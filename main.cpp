@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vulkan/vulkan_core.h>
@@ -52,6 +54,11 @@ private:
     VkQueue m_presentQueue;
 
     VkSurfaceKHR m_surface;
+    VkSwapchainKHR m_swapChain;
+    std::vector<VkImage> m_swapChainImages;
+    std::vector<VkImageView> m_swapChainImageViews;
+    VkFormat m_swapChainFormat;
+    VkExtent2D m_swapChainExtent;
 
     struct QueueFamilyIndices
     {
@@ -108,6 +115,81 @@ private:
         createSurface();
         choosePhysicalDevice();
         createLogicalDevice();
+        createSwapChain();
+        createImageViews();
+    }
+
+    void createImageViews()
+    {
+        m_swapChainImageViews.resize(m_swapChainImages.size());
+        for (uint32_t i = 0; i < m_swapChainImages.size(); i++)
+        {
+            VkImageViewCreateInfo imageViewInfo{
+                VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+                nullptr,
+                0,
+                m_swapChainImages[i],
+                VK_IMAGE_VIEW_TYPE_2D,
+                m_swapChainFormat,
+                VkComponentMapping{ VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
+                VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+            };
+
+            if (vkCreateImageView(m_device, &imageViewInfo, nullptr, &m_swapChainImageViews[i]) != VK_SUCCESS)
+                throw std::runtime_error("failed to create image views!");
+        }
+    }
+
+    void createSwapChain()
+    {
+        SwapChainSupportDetails swapChainSupport = querySwapChainSupportDetails(m_physicalDevice);
+
+        VkSurfaceFormatKHR format = chooseSwapChainFormat(swapChainSupport.formats);
+        VkPresentModeKHR presentMode = choosePresentMode(swapChainSupport.presentModes);
+        VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
+
+        uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
+
+        QueueFamilyIndices indices = findQueueFamilies(m_physicalDevice);
+        uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
+
+        VkSwapchainCreateInfoKHR swapChainInfo{
+            VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
+            nullptr,
+            0,
+            m_surface,
+            imageCount,
+            format.format,
+            format.colorSpace,
+            extent,
+            1,
+            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+            VK_SHARING_MODE_EXCLUSIVE,
+            0,       // queue family count - changes depending on whether the graphics family is the same as the present family index
+            nullptr, // same as above
+            swapChainSupport.capabilities.currentTransform,
+            VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+            presentMode,
+            VK_FALSE, // real-time rendering for video games should be set to VK_TRUE for performance, but if we're doing offline rendering then VK_FALSE
+            nullptr
+        };
+
+        if (indices.graphicsFamily.value() != indices.presentFamily.value())
+        {
+            swapChainInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+            swapChainInfo.queueFamilyIndexCount = 2;
+            swapChainInfo.pQueueFamilyIndices = queueFamilyIndices;
+        }
+
+        if (vkCreateSwapchainKHR(m_device, &swapChainInfo, nullptr, &m_swapChain) != VK_SUCCESS)
+            throw std::runtime_error("failed to create swap chain!");
+
+        vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, nullptr);
+        m_swapChainImages.resize(imageCount);
+        vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, m_swapChainImages.data());
+
+        m_swapChainFormat = format.format;
+        m_swapChainExtent = extent;
     }
 
     void createSurface()
@@ -251,6 +333,10 @@ private:
     }
     void cleanup()
     {
+        for (VkImageView &imageView : m_swapChainImageViews)
+            vkDestroyImageView(m_device, imageView, nullptr);
+
+        vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
         vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
         vkDestroyDevice(m_device, nullptr);
         vkDestroyInstance(m_instance, nullptr);
@@ -421,6 +507,7 @@ private:
 
         // get capabilities
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, m_surface, &details.capabilities);
+        // std::clog << "(" << details.capabilities.currentExtent.width << ", " << details.capabilities.currentExtent.height << ")" << std::endl;
 
         // get formats
         uint32_t surfaceFormatCount = 0;
@@ -456,6 +543,50 @@ private:
         }
 
         return indices.isComplete() && swapChainAdequate && extensionsSupported;
+    }
+
+    VkSurfaceFormatKHR chooseSwapChainFormat(std::vector<VkSurfaceFormatKHR> &availableFormats)
+    {
+
+        for (const auto &format : availableFormats)
+        {
+            if (format.format == VK_FORMAT_B8G8R8A8_SRGB && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+                return format;
+        }
+
+        return availableFormats[0];
+    }
+
+    VkPresentModeKHR choosePresentMode(std::vector<VkPresentModeKHR> &availablePresentModes)
+    {
+        for (const auto &presentMode : availablePresentModes)
+        {
+            if (presentMode == VK_PRESENT_MODE_MAILBOX_KHR)
+                return presentMode;
+        }
+
+        return VK_PRESENT_MODE_FIFO_KHR;
+    }
+
+    VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities)
+    {
+        if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max())
+            return capabilities.currentExtent;
+        else
+        {
+            int width, height;
+            glfwGetFramebufferSize(m_window, &width, &height);
+
+            VkExtent2D actualExtent{
+                static_cast<uint32_t>(width),
+                static_cast<uint32_t>(height)
+            };
+
+            std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+            std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+
+            return actualExtent;
+        }
     }
 };
 
