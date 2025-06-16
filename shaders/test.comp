@@ -1,5 +1,7 @@
 #version 460 core
 
+layout (set = 0, binding = 0, rgba32f) uniform image2D outputFramebuffer;
+
 void main(void)
 {
 }

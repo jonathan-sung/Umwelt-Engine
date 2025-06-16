@@ -2,6 +2,7 @@
 #include <bitset>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <optional>
 #include <string>
@@ -51,6 +52,13 @@ private:
     VkDevice m_device;
     VkQueue m_graphicsQueue;
     VkQueue m_presentQueue;
+    VkCommandPool commandPool;
+    std::vector<VkCommandBuffer> commandBuffers;
+
+    // Pipeline
+    std::vector<VkPipeline> computePipelines{};
+    VkPipelineLayout computePipelineLayout;
+    VkDescriptorSetLayout computeDescriptorSetLayout;
 
     VkSurfaceKHR m_surface;
     VkSwapchainKHR m_swapChain;
@@ -68,10 +76,11 @@ private:
     {
         std::optional<uint32_t> graphicsFamily;
         std::optional<uint32_t> presentFamily;
+        std::optional<uint32_t> computeFamily;
 
         bool isComplete()
         {
-            return graphicsFamily.has_value() && presentFamily.has_value();
+            return graphicsFamily.has_value() && presentFamily.has_value() && computeFamily.has_value();
         }
     };
 
@@ -123,14 +132,82 @@ private:
         createImageViews();
         createManualFramebuffer();
         createComputePipeline();
+        createCommandPool();
+        testOutComputePipeline();
+    }
+
+    void testOutComputePipeline()
+    {
+        QueueFamilyIndices indices = findQueueFamilies(m_physicalDevice);
+
+        VkCommandBufferBeginInfo beginInfo{
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            nullptr,
+            0,
+            nullptr
+        };
+
+        vkBeginCommandBuffer(commandBuffers[0], &beginInfo);
+        vkCmdBindPipeline(commandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, computePipelines[0]);
+        vkCmdDispatch(commandBuffers[0], 64, 1, 1); // a linear work group of 64x1x1 invocations
+        vkEndCommandBuffer(commandBuffers[0]);
+
+        vkDeviceWaitIdle(m_device);
+    }
+
+    void createCommandPool()
+    {
+        QueueFamilyIndices indices = findQueueFamilies(m_physicalDevice);
+
+        VkCommandPoolCreateInfo commandPoolInfo{
+            VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            nullptr,
+            0,
+            indices.computeFamily.value()
+        };
+
+        if (vkCreateCommandPool(m_device, &commandPoolInfo, nullptr, &commandPool) != VK_SUCCESS)
+            throw std::runtime_error("failed to create command pool!");
+
+        VkCommandBufferAllocateInfo allocInfo{
+            VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            nullptr,
+            commandPool,
+            VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            1
+        };
+
+        commandBuffers.resize(allocInfo.commandBufferCount);
+
+        vkAllocateCommandBuffers(m_device, &allocInfo, commandBuffers.data());
+    }
+
+    VkShaderModule createShaderModule(const std::string &fileName)
+    {
+        std::vector<char> code = readFile(fileName);
+
+        VkShaderModule shaderModule;
+
+        // create shader module
+        VkShaderModuleCreateInfo shaderModuleInfo{
+            VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+            nullptr,
+            0,                                              // flags
+            code.size(),                                    // code size
+            reinterpret_cast<const uint32_t *>(code.data()) // code data
+        };
+
+        if (vkCreateShaderModule(m_device, &shaderModuleInfo, nullptr, &shaderModule) != VK_SUCCESS)
+            throw std::runtime_error("failed to create compute shader module!");
+
+        return shaderModule;
     }
 
     void createComputePipeline()
     {
-        VkPipelineCache pipelineCache;
-        VkPipelineLayout computePipelineLayout;
-        VkShaderModule computeShaderModule;
+        VkShaderModule computeShaderModule = createShaderModule("shaders/test.spv");
 
+        // create compute pipeline
         VkPipelineShaderStageCreateInfo computeShaderStageInfo{
             VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             nullptr,
@@ -138,18 +215,42 @@ private:
             VK_SHADER_STAGE_COMPUTE_BIT,
             computeShaderModule,
             "main",
+            nullptr // specialization info
+        };
+
+        // create descriptor sets
+
+        VkDescriptorSetLayoutBinding descriptorSetBinding{
+            0,
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            1,
+            VK_SHADER_STAGE_ALL,
             nullptr
         };
+
+        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            nullptr,
+            0,
+            1,
+            &descriptorSetBinding
+        };
+
+        if (vkCreateDescriptorSetLayout(m_device, &descriptorSetLayoutInfo, nullptr, &computeDescriptorSetLayout) != VK_SUCCESS)
+            throw std::runtime_error("failed to create descriptor set layout!");
 
         VkPipelineLayoutCreateInfo computePipelineLayoutInfo{
             VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             nullptr,
             0,
-            0,       // set layout
-            nullptr, // descriptor set layout
-            0,       // push constant range
-            nullptr  // push constants
+            1,                           // set layout count
+            &computeDescriptorSetLayout, // descriptor set layouts
+            0,                           // push constant range
+            nullptr                      // push constants
         };
+
+        if (vkCreatePipelineLayout(m_device, &computePipelineLayoutInfo, nullptr, &computePipelineLayout) != VK_SUCCESS)
+            throw std::runtime_error("failed to create pipeline layout!");
 
         VkComputePipelineCreateInfo computePipelineInfo{
             VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
@@ -162,9 +263,15 @@ private:
         };
 
         std::vector<VkComputePipelineCreateInfo> computePipelineInfos{ computePipelineInfo };
-        std::vector<VkPipeline> computePipelines;
 
-        vkCreateComputePipelines(m_device, pipelineCache, computePipelineInfos.size(), computePipelineInfos.data(), nullptr, computePipelines.data());
+        // std::clog << "number of compute pipeline create infos: " << computePipelineInfos.size() << std::endl;
+
+        computePipelines.resize(computePipelineInfos.size());
+
+        if (vkCreateComputePipelines(m_device, nullptr, computePipelineInfos.size(), computePipelineInfos.data(), nullptr, computePipelines.data()) != VK_SUCCESS)
+            throw std::runtime_error("failed to create compute pipeline!");
+
+        vkDestroyShaderModule(m_device, computeShaderModule, nullptr);
     }
 
     bool createBlockOfMemory(uint32_t memoryType, VkDeviceSize size, VkDeviceMemory &memoryBlock)
@@ -460,10 +567,25 @@ private:
         while (!glfwWindowShouldClose(m_window))
         {
             glfwPollEvents();
+            drawFrame();
         }
     }
+
+    void drawFrame()
+    {
+    }
+
     void cleanup()
     {
+        vkDeviceWaitIdle(m_device);
+        vkDestroyDescriptorSetLayout(m_device, computeDescriptorSetLayout, nullptr);
+        vkDestroyCommandPool(m_device, commandPool, nullptr);
+
+        // pipeline objects
+        for (auto pipeline : computePipelines)
+            vkDestroyPipeline(m_device, pipeline, nullptr);
+        vkDestroyPipelineLayout(m_device, computePipelineLayout, nullptr);
+
         // memory objects
         vkDestroyBufferView(m_device, m_frameBufferView, nullptr);
         vkFreeMemory(m_device, m_memoryBlock, nullptr);
@@ -602,9 +724,13 @@ private:
 
         for (uint32_t i = 0; i < queueFamilyProperties.size(); i++)
         {
+            // std::clog << i << ":" << std::bitset<32>(queueFamilyProperties[i].queueFlags) << std::endl;
             // check for graphics queue family
             if (queueFamilyProperties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
                 indices.graphicsFamily = i;
+
+            if (queueFamilyProperties[i].queueFlags & VK_QUEUE_COMPUTE_BIT)
+                indices.computeFamily = i;
 
             // check for presentation queue family
             VkBool32 presentSupport = false;
@@ -761,14 +887,14 @@ private:
         {
             bool currentMemoryTypeSupported = memoryRequirements.memoryTypeBits & (1 << i);
             bool allRequiredFlagsAvailable = (memoryProperties.memoryTypes[i].propertyFlags & requiredFlags) == requiredFlags;
-            std::clog << "suitable memory bits: \t" << std::bitset<32>(memoryRequirements.memoryTypeBits) << std::endl;
-            std::clog << "current bit: \t\t" << std::bitset<32>(1 << i) << std::endl;
-            std::clog << "memory property flags: \t" << std::bitset<32>(memoryProperties.memoryTypes[i].propertyFlags) << std::endl;
-            std::clog << "required flags: \t" << std::bitset<32>(requiredFlags) << std::endl;
-            std::clog << "memory heap flags: \t" << std::bitset<32>(memoryProperties.memoryHeaps[memoryProperties.memoryTypes[i].heapIndex].flags) << std::endl;
-            std::clog << "memory heap index: \t" << (memoryProperties.memoryTypes[i].heapIndex) << std::endl;
-            std::clog << "memory heap size: \t" << (memoryProperties.memoryHeaps[memoryProperties.memoryTypes[i].heapIndex].size) << std::endl;
-            std::clog << std::endl;
+            // std::clog << "suitable memory bits: \t" << std::bitset<32>(memoryRequirements.memoryTypeBits) << std::endl;
+            // std::clog << "current bit: \t\t" << std::bitset<32>(1 << i) << std::endl;
+            // std::clog << "memory property flags: \t" << std::bitset<32>(memoryProperties.memoryTypes[i].propertyFlags) << std::endl;
+            // std::clog << "required flags: \t" << std::bitset<32>(requiredFlags) << std::endl;
+            // std::clog << "memory heap flags: \t" << std::bitset<32>(memoryProperties.memoryHeaps[memoryProperties.memoryTypes[i].heapIndex].flags) << std::endl;
+            // std::clog << "memory heap index: \t" << (memoryProperties.memoryTypes[i].heapIndex) << std::endl;
+            // std::clog << "memory heap size: \t" << (memoryProperties.memoryHeaps[memoryProperties.memoryTypes[i].heapIndex].size) << std::endl;
+            // std::clog << std::endl;
             if (allRequiredFlagsAvailable && currentMemoryTypeSupported)
             {
                 selectedMemoryType = i;
@@ -777,6 +903,21 @@ private:
         }
 
         return selectedMemoryType;
+    }
+
+    static std::vector<char> readFile(const std::string &fileName)
+    {
+        std::ifstream file(fileName, std::ios::ate | std::ios::binary);
+
+        if (!file.is_open())
+            throw std::runtime_error("failed to open file!");
+
+        size_t fileSize = static_cast<size_t>(file.tellg());
+        std::vector<char> buffer(fileSize);
+        file.seekg(0);
+        file.read(buffer.data(), fileSize);
+        file.close();
+        return buffer;
     }
 };
 
