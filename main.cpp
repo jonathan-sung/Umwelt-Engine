@@ -68,9 +68,6 @@ private:
     VkExtent2D m_swapChainExtent;
 
     // Memory stuff
-    VkBuffer m_frameBuffer;
-    VkBufferView m_frameBufferView;
-    VkDeviceMemory m_memoryBlock;
 
     struct QueueFamilyIndices
     {
@@ -295,66 +292,7 @@ private:
 
     void createManualFramebuffer()
     {
-        // VkFormatProperties formatProperties;
-        // vkGetPhysicalDeviceFormatProperties(m_physicalDevice, m_swapChainFormat, &formatProperties);
-        // std::clog << "\t format properties: " << std::bitset<32>(formatProperties.bufferFeatures) << std::endl;
 
-        QueueFamilyIndices queueFamilies = findQueueFamilies(m_physicalDevice);
-        std::vector<uint32_t> queueFamilyIndices = { queueFamilies.graphicsFamily.value() };
-
-        VkDeviceSize frameBufferSize = m_swapChainExtent.width * m_swapChainExtent.height * 8 * 4;
-
-        // create buffer
-        VkBufferCreateInfo bufferInfo{
-            VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-            nullptr,
-            0,
-            frameBufferSize,
-            VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            VK_SHARING_MODE_EXCLUSIVE,
-            static_cast<uint32_t>(queueFamilyIndices.size()),
-            queueFamilyIndices.data()
-        };
-
-        if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_frameBuffer) != VK_SUCCESS)
-            throw std::runtime_error("failed to create buffer!");
-
-        // allocate memory
-        // viewMemoryTypes();
-        VkMemoryRequirements bufferMemoryRequirements{};
-        vkGetBufferMemoryRequirements(m_device, m_frameBuffer, &bufferMemoryRequirements);
-
-        VkMemoryPropertyFlags requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-        std::optional<uint32_t> memoryTypeIndex = getMemoryTypeIndex(bufferMemoryRequirements, requiredFlags);
-
-        if (!memoryTypeIndex.has_value())
-            throw std::runtime_error("no suitable memory type found!");
-
-        if (!createBlockOfMemory(memoryTypeIndex.value(), frameBufferSize, m_memoryBlock))
-            throw std::runtime_error("failed to create block of memory!");
-
-        // bind buffer
-        if (vkBindBufferMemory(m_device, m_frameBuffer, m_memoryBlock, 0) != VK_SUCCESS)
-            throw std::runtime_error("failed to bind buffer memory!");
-
-        // write data into buffer from host
-
-        // void *data;
-        // vkMapMemory(m_device, bufferMemory, 0, bufferSize, 0, &data);
-
-        // create buffer view
-        VkBufferViewCreateInfo bufferViewInfo{
-            VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO,
-            nullptr,
-            0,
-            m_frameBuffer,
-            m_swapChainFormat,
-            0,
-            frameBufferSize
-        };
-
-        if (vkCreateBufferView(m_device, &bufferViewInfo, nullptr, &m_frameBufferView) != VK_SUCCESS)
-            throw std::runtime_error("failed to create buffer view!");
     }
 
     void createImageViews()
@@ -585,11 +523,6 @@ private:
         for (auto pipeline : computePipelines)
             vkDestroyPipeline(m_device, pipeline, nullptr);
         vkDestroyPipelineLayout(m_device, computePipelineLayout, nullptr);
-
-        // memory objects
-        vkDestroyBufferView(m_device, m_frameBufferView, nullptr);
-        vkFreeMemory(m_device, m_memoryBlock, nullptr);
-        vkDestroyBuffer(m_device, m_frameBuffer, nullptr);
 
         for (VkImageView &imageView : m_swapChainImageViews)
             vkDestroyImageView(m_device, imageView, nullptr);
