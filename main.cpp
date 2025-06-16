@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <bitset>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -29,14 +30,12 @@ class Game
 public:
     Game(const uint32_t width, const uint32_t height) : m_width(width), m_height(height)
     {
-        // std::clog << "game object created!" << std::endl;
         initWindow();
         initVulkan();
     }
 
     ~Game()
     {
-        // std::clog << "game object destroyed!" << std::endl;
         cleanup();
     }
 
@@ -59,6 +58,11 @@ private:
     std::vector<VkImageView> m_swapChainImageViews;
     VkFormat m_swapChainFormat;
     VkExtent2D m_swapChainExtent;
+
+    // Memory stuff
+    VkBuffer m_frameBuffer;
+    VkBufferView m_frameBufferView;
+    VkDeviceMemory m_memoryBlock;
 
     struct QueueFamilyIndices
     {
@@ -117,6 +121,133 @@ private:
         createLogicalDevice();
         createSwapChain();
         createImageViews();
+        createManualFramebuffer();
+        createComputePipeline();
+    }
+
+    void createComputePipeline()
+    {
+        VkPipelineCache pipelineCache;
+        VkPipelineLayout computePipelineLayout;
+        VkShaderModule computeShaderModule;
+
+        VkPipelineShaderStageCreateInfo computeShaderStageInfo{
+            VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            nullptr,
+            0,
+            VK_SHADER_STAGE_COMPUTE_BIT,
+            computeShaderModule,
+            "main",
+            nullptr
+        };
+
+        VkPipelineLayoutCreateInfo computePipelineLayoutInfo{
+            VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+            nullptr,
+            0,
+            0,       // set layout
+            nullptr, // descriptor set layout
+            0,       // push constant range
+            nullptr  // push constants
+        };
+
+        VkComputePipelineCreateInfo computePipelineInfo{
+            VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+            nullptr,
+            0,
+            computeShaderStageInfo,
+            computePipelineLayout,
+            VK_NULL_HANDLE,
+            0
+        };
+
+        std::vector<VkComputePipelineCreateInfo> computePipelineInfos{ computePipelineInfo };
+        std::vector<VkPipeline> computePipelines;
+
+        vkCreateComputePipelines(m_device, pipelineCache, computePipelineInfos.size(), computePipelineInfos.data(), nullptr, computePipelines.data());
+    }
+
+    bool createBlockOfMemory(uint32_t memoryType, VkDeviceSize size, VkDeviceMemory &memoryBlock)
+    {
+        bool success = false;
+
+        VkMemoryAllocateInfo allocateInfo{
+            VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            nullptr,
+            size,
+            memoryType
+        };
+
+        if (vkAllocateMemory(m_device, &allocateInfo, nullptr, &memoryBlock) != VK_SUCCESS)
+            throw std::runtime_error("failed to allocate memory!");
+
+        success = true;
+
+        return success;
+    }
+
+    void createManualFramebuffer()
+    {
+        // VkFormatProperties formatProperties;
+        // vkGetPhysicalDeviceFormatProperties(m_physicalDevice, m_swapChainFormat, &formatProperties);
+        // std::clog << "\t format properties: " << std::bitset<32>(formatProperties.bufferFeatures) << std::endl;
+
+        QueueFamilyIndices queueFamilies = findQueueFamilies(m_physicalDevice);
+        std::vector<uint32_t> queueFamilyIndices = { queueFamilies.graphicsFamily.value() };
+
+        VkDeviceSize frameBufferSize = m_swapChainExtent.width * m_swapChainExtent.height * 8 * 4;
+
+        // create buffer
+        VkBufferCreateInfo bufferInfo{
+            VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            nullptr,
+            0,
+            frameBufferSize,
+            VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VK_SHARING_MODE_EXCLUSIVE,
+            static_cast<uint32_t>(queueFamilyIndices.size()),
+            queueFamilyIndices.data()
+        };
+
+        if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_frameBuffer) != VK_SUCCESS)
+            throw std::runtime_error("failed to create buffer!");
+
+        // allocate memory
+        // viewMemoryTypes();
+        VkMemoryRequirements bufferMemoryRequirements{};
+        vkGetBufferMemoryRequirements(m_device, m_frameBuffer, &bufferMemoryRequirements);
+
+        VkMemoryPropertyFlags requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        std::optional<uint32_t> memoryTypeIndex = getMemoryTypeIndex(bufferMemoryRequirements, requiredFlags);
+
+        if (!memoryTypeIndex.has_value())
+            throw std::runtime_error("no suitable memory type found!");
+
+        if (!createBlockOfMemory(memoryTypeIndex.value(), frameBufferSize, m_memoryBlock))
+            throw std::runtime_error("failed to create block of memory!");
+
+        // bind buffer
+        if (vkBindBufferMemory(m_device, m_frameBuffer, m_memoryBlock, 0) != VK_SUCCESS)
+            throw std::runtime_error("failed to bind buffer memory!");
+
+        // write data into buffer from host
+
+        // void *data;
+        // vkMapMemory(m_device, bufferMemory, 0, bufferSize, 0, &data);
+
+        // create buffer view
+        VkBufferViewCreateInfo bufferViewInfo{
+            VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO,
+            nullptr,
+            0,
+            m_frameBuffer,
+            m_swapChainFormat,
+            0,
+            frameBufferSize
+        };
+
+        if (vkCreateBufferView(m_device, &bufferViewInfo, nullptr, &m_frameBufferView) != VK_SUCCESS)
+            throw std::runtime_error("failed to create buffer view!");
     }
 
     void createImageViews()
@@ -333,6 +464,11 @@ private:
     }
     void cleanup()
     {
+        // memory objects
+        vkDestroyBufferView(m_device, m_frameBufferView, nullptr);
+        vkFreeMemory(m_device, m_memoryBlock, nullptr);
+        vkDestroyBuffer(m_device, m_frameBuffer, nullptr);
+
         for (VkImageView &imageView : m_swapChainImageViews)
             vkDestroyImageView(m_device, imageView, nullptr);
 
@@ -587,6 +723,60 @@ private:
 
             return actualExtent;
         }
+    }
+
+    void viewMemoryTypes()
+    {
+        VkPhysicalDeviceMemoryProperties memoryProperties{};
+        vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memoryProperties);
+
+        std::clog << "memory types:\n";
+        for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++)
+        {
+            std::clog << "\t heap index: " << memoryProperties.memoryTypes[i].heapIndex << std::endl;
+            std::clog << "\t flag bits: " << std::bitset<32>(memoryProperties.memoryTypes[i].propertyFlags) << std::endl;
+        }
+
+        std::clog << "memory heaps:\n";
+        for (uint32_t i = 0; i < memoryProperties.memoryHeapCount; i++)
+        {
+            std::clog << "\t memory heap size: " << memoryProperties.memoryHeaps[i].size << std::endl;
+            std::clog << "\t memory heap flag bits: " << std::bitset<32>(memoryProperties.memoryHeaps[i].flags) << std::endl;
+        }
+    }
+
+    std::optional<uint32_t> getMemoryTypeIndex(const VkMemoryRequirements &memoryRequirements, const VkMemoryPropertyFlags &requiredFlags)
+    {
+        std::optional<uint32_t> selectedMemoryType;
+
+        // std::clog << "memory requirements:\n";
+        // std::clog << "\t suitable memory type index bits: " << std::bitset<32>(memoryRequirements.memoryTypeBits) << std::endl;
+        // std::clog << "\t memory alignment: " << memoryRequirements.alignment << std::endl;
+        // std::clog << "\t memory size: " << memoryRequirements.size << std::endl;
+
+        VkPhysicalDeviceMemoryProperties memoryProperties{};
+        vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memoryProperties);
+
+        for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++)
+        {
+            bool currentMemoryTypeSupported = memoryRequirements.memoryTypeBits & (1 << i);
+            bool allRequiredFlagsAvailable = (memoryProperties.memoryTypes[i].propertyFlags & requiredFlags) == requiredFlags;
+            std::clog << "suitable memory bits: \t" << std::bitset<32>(memoryRequirements.memoryTypeBits) << std::endl;
+            std::clog << "current bit: \t\t" << std::bitset<32>(1 << i) << std::endl;
+            std::clog << "memory property flags: \t" << std::bitset<32>(memoryProperties.memoryTypes[i].propertyFlags) << std::endl;
+            std::clog << "required flags: \t" << std::bitset<32>(requiredFlags) << std::endl;
+            std::clog << "memory heap flags: \t" << std::bitset<32>(memoryProperties.memoryHeaps[memoryProperties.memoryTypes[i].heapIndex].flags) << std::endl;
+            std::clog << "memory heap index: \t" << (memoryProperties.memoryTypes[i].heapIndex) << std::endl;
+            std::clog << "memory heap size: \t" << (memoryProperties.memoryHeaps[memoryProperties.memoryTypes[i].heapIndex].size) << std::endl;
+            std::clog << std::endl;
+            if (allRequiredFlagsAvailable && currentMemoryTypeSupported)
+            {
+                selectedMemoryType = i;
+                break;
+            }
+        }
+
+        return selectedMemoryType;
     }
 };
 

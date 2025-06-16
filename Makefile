@@ -1,13 +1,17 @@
-CFLAGS = -std=c++17 -O2
+CFLAGS = -std=c++2b -O2
 LDFLAGS = -lglfw -lvulkan -ldl -lpthread -lX11 -lXxf86vm -lXrandr -lXi
+NAME = VulkanFun
 
-all: main.cpp
-	g++ $(CFLAGS) *.cpp $(LDFLAGS)
+all: VulkanFun
+
+VulkanFun : main.cpp 
+	g++ $(CFLAGS) *.cpp $(LDFLAGS) -o $(NAME)
 
 .PHONY: run clean
 
-run: all
-	./a.out
+run: VulkanFun 
+	./$(NAME)
 
 clean:
-	rm -f a.out
+	rm -f $(NAME)
+	rm -f shaders/*.spv
