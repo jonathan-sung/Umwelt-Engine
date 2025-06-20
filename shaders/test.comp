@@ -1,7 +1,9 @@
-#version 460 core
+#version 450 core
 
-layout (set = 0, binding = 0, rgba32f) uniform image2D outputFramebuffer;
+layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+layout(set = 0, binding = 0, rgba8) uniform writeonly image2D outputImage;
 
 void main(void)
 {
+    imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(1.0));
 }

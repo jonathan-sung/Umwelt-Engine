@@ -26,6 +26,17 @@ bool validationLayersEnabled = false;
 bool validationLayersEnabled = true;
 #endif
 
+#define VK_CHECK(x)                                                                     \
+    do                                                                                  \
+    {                                                                                   \
+        VkResult err = x;                                                               \
+        if (err)                                                                        \
+        {                                                                               \
+            std::string errorMessage = "Detected Vulkan error: " + std::to_string(err); \
+            throw std::runtime_error(errorMessage);                                     \
+        }                                                                               \
+    } while (0)
+
 class Game
 {
 public:
@@ -52,13 +63,16 @@ private:
     VkDevice m_device;
     VkQueue m_graphicsQueue;
     VkQueue m_presentQueue;
+    VkQueue m_computeQueue;
     VkCommandPool commandPool;
     std::vector<VkCommandBuffer> commandBuffers;
 
     // Pipeline
-    std::vector<VkPipeline> computePipelines{};
-    VkPipelineLayout computePipelineLayout;
-    VkDescriptorSetLayout computeDescriptorSetLayout;
+    std::vector<VkPipeline> m_computePipelines{};
+    VkPipelineLayout m_computePipelineLayout;
+    VkDescriptorSetLayout m_computeDescriptorSetLayout;
+    VkDescriptorPool m_descriptorPool;
+    VkDescriptorSet m_descriptorSet;
 
     VkSurfaceKHR m_surface;
     VkSwapchainKHR m_swapChain;
@@ -67,7 +81,10 @@ private:
     VkFormat m_swapChainFormat;
     VkExtent2D m_swapChainExtent;
 
-    // Memory stuff
+    // Resources
+    VkDeviceMemory m_memory_computeImage;
+    VkImage m_computeImage;
+    VkImageView m_computeImageView;
 
     struct QueueFamilyIndices
     {
@@ -127,10 +144,92 @@ private:
         createLogicalDevice();
         createSwapChain();
         createImageViews();
-        createManualFramebuffer();
+        createResources();
         createComputePipeline();
         createCommandPool();
+        createGraphicsPipeline();
         testOutComputePipeline();
+    }
+
+    void createGraphicsPipeline()
+    {
+    }
+
+    void createResources()
+    {
+        // Check for suitable formats
+        // for (uint32_t i = 0; i < 184; i++)
+        // {
+        //     VkFormatProperties formatProperties{};
+        //     vkGetPhysicalDeviceFormatProperties(m_physicalDevice, (VkFormat)i, &formatProperties);
+        //     if (formatProperties.linearTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)
+        //     {
+        //         std::clog << "suitable format: " << i << std::endl;
+        //     }
+        // }
+        VkFormatProperties formatProperties{};
+        vkGetPhysicalDeviceFormatProperties(m_physicalDevice, VK_FORMAT_B8G8R8A8_UNORM, &formatProperties);
+
+        std::clog << "linear tiling features: " << std::bitset<32>(formatProperties.linearTilingFeatures) << std::endl;
+        std::clog << "optimal tiling features: " << std::bitset<32>(formatProperties.optimalTilingFeatures) << std::endl;
+
+        VkImageFormatProperties imageFormatProperties{};
+        vkGetPhysicalDeviceImageFormatProperties(m_physicalDevice, VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_LINEAR, VK_IMAGE_USAGE_STORAGE_BIT, 0, &imageFormatProperties);
+
+        std::clog << "image max array layers: " << imageFormatProperties.maxArrayLayers << std::endl;
+        std::clog << "image max mip levels: " << imageFormatProperties.maxMipLevels << std::endl;
+        std::clog << "image supported sample count bits: " << std::bitset<32>(imageFormatProperties.sampleCounts) << std::endl;
+        std::clog << "image max extent: (" << imageFormatProperties.maxExtent.width << ", " << imageFormatProperties.maxExtent.height << ", " << imageFormatProperties.maxExtent.depth << ")" << std::endl;
+
+        VkImageCreateInfo imageInfo{
+            VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            nullptr,
+            0,
+            VK_IMAGE_TYPE_2D,
+            VK_FORMAT_B8G8R8A8_UNORM,
+            VkExtent3D{ m_width, m_height, 1 },
+            1,
+            1,
+            VK_SAMPLE_COUNT_1_BIT,
+            VK_IMAGE_TILING_OPTIMAL, // CHANGE THIS BACK TO OPTIMAL IF IT WORKS
+            VK_IMAGE_USAGE_STORAGE_BIT,
+            VK_SHARING_MODE_EXCLUSIVE, // change this if the graphics queue and compute queue are different
+            0,
+            nullptr,
+            VK_IMAGE_LAYOUT_UNDEFINED
+        };
+
+        VK_CHECK(vkCreateImage(m_device, &imageInfo, nullptr, &m_computeImage));
+
+        VkMemoryRequirements imageMemoryRequirements{};
+
+        vkGetImageMemoryRequirements(m_device, m_computeImage, &imageMemoryRequirements);
+
+        // std::clog << "REQUIRED SIZE: " << imageMemoryRequirements.size << std::endl;
+
+        VkMemoryAllocateInfo memoryAllocInfo{
+            VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            nullptr,
+            imageMemoryRequirements.size,
+            getMemoryTypeIndex(imageMemoryRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT).value()
+        };
+
+        VK_CHECK(vkAllocateMemory(m_device, &memoryAllocInfo, nullptr, &m_memory_computeImage));
+
+        VK_CHECK(vkBindImageMemory(m_device, m_computeImage, m_memory_computeImage, 0));
+
+        VkImageViewCreateInfo imageViewInfo{
+            VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            nullptr,
+            0,
+            m_computeImage,
+            VK_IMAGE_VIEW_TYPE_2D,
+            VK_FORMAT_B8G8R8A8_UNORM,
+            VkComponentMapping{ VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
+            VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+        };
+
+        VK_CHECK(vkCreateImageView(m_device, &imageViewInfo, nullptr, &m_computeImageView));
     }
 
     void testOutComputePipeline()
@@ -144,12 +243,46 @@ private:
             nullptr
         };
 
+        VkImageMemoryBarrier imageMemoryBarrier{
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            nullptr,
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_GENERAL,
+            VK_QUEUE_FAMILY_IGNORED,
+            VK_QUEUE_FAMILY_IGNORED,
+            m_computeImage,
+            VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS }
+        };
+
         vkBeginCommandBuffer(commandBuffers[0], &beginInfo);
-        vkCmdBindPipeline(commandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, computePipelines[0]);
+        vkCmdBindPipeline(commandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipelines[0]);
+        vkCmdPipelineBarrier(commandBuffers[0], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
+        vkCmdBindDescriptorSets(commandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipelineLayout, 0, 1, &m_descriptorSet, 0, nullptr);
         vkCmdDispatch(commandBuffers[0], 64, 1, 1); // a linear work group of 64x1x1 invocations
         vkEndCommandBuffer(commandBuffers[0]);
 
+        VkFence fence;
+        VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, 0 };
+        VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &fence));
+        VkSubmitInfo submitInfo{
+            VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            nullptr,
+            0,
+            nullptr,
+            nullptr,
+            1,
+            commandBuffers.data(),
+            0,
+            nullptr
+        };
+        VK_CHECK(vkQueueSubmit(m_computeQueue, 1, &submitInfo, fence));
+        VK_CHECK(vkWaitForFences(m_device, 1, &fence, VK_TRUE, UINT64_MAX));
+        vkDestroyFence(m_device, fence, nullptr);
+
         vkDeviceWaitIdle(m_device);
+        std::clog << "all compute commands have been completed by the device" << std::endl;
     }
 
     void createCommandPool()
@@ -215,6 +348,14 @@ private:
             nullptr // specialization info
         };
 
+        // check limits
+        VkPhysicalDeviceLimits limits{};
+        VkPhysicalDeviceProperties properties;
+        vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
+        std::clog << "max group size: " << properties.limits.maxComputeWorkGroupSize[0] << ", " << properties.limits.maxComputeWorkGroupSize[1] << ", " << properties.limits.maxComputeWorkGroupSize[2] << std::endl;
+        std::clog << "max group count: " << properties.limits.maxComputeWorkGroupCount[0] << ", " << properties.limits.maxComputeWorkGroupCount[1] << ", " << properties.limits.maxComputeWorkGroupCount[2] << std::endl;
+        std::clog << "max group invocations: " << properties.limits.maxComputeWorkGroupInvocations << std::endl;
+
         // create descriptor sets
 
         VkDescriptorSetLayoutBinding descriptorSetBinding{
@@ -233,20 +374,70 @@ private:
             &descriptorSetBinding
         };
 
-        if (vkCreateDescriptorSetLayout(m_device, &descriptorSetLayoutInfo, nullptr, &computeDescriptorSetLayout) != VK_SUCCESS)
+        if (vkCreateDescriptorSetLayout(m_device, &descriptorSetLayoutInfo, nullptr, &m_computeDescriptorSetLayout) != VK_SUCCESS)
             throw std::runtime_error("failed to create descriptor set layout!");
+
+        VkDescriptorPoolSize poolSize{
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            1
+        };
+
+        VkDescriptorPoolCreateInfo poolInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            nullptr,
+            0,
+            1,
+            1,
+            &poolSize
+        };
+
+        if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool))
+            throw std::runtime_error("failed to create descriptor pool!");
+
+        VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            nullptr,
+            m_descriptorPool,
+            1,
+            &m_computeDescriptorSetLayout
+        };
+        if (vkAllocateDescriptorSets(m_device, &descriptorSetAllocateInfo, &m_descriptorSet) != VK_SUCCESS)
+            throw std::runtime_error("failed to allocate descriptor sets!");
+
+        VkDescriptorImageInfo descriptorImageInfo{
+            nullptr,
+            m_computeImageView,
+            VK_IMAGE_LAYOUT_GENERAL
+        };
+
+        VkWriteDescriptorSet writeDescriptorSetInfo{
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            nullptr,
+            m_descriptorSet,
+            0,
+            0,
+            1,
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            &descriptorImageInfo,
+            nullptr,
+            nullptr
+        };
+
+        vkUpdateDescriptorSets(m_device, 1, &writeDescriptorSetInfo, 0, nullptr);
+
+        // create compute pipeline
 
         VkPipelineLayoutCreateInfo computePipelineLayoutInfo{
             VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             nullptr,
             0,
-            1,                           // set layout count
-            &computeDescriptorSetLayout, // descriptor set layouts
-            0,                           // push constant range
-            nullptr                      // push constants
+            1,                             // set layout count
+            &m_computeDescriptorSetLayout, // descriptor set layouts
+            0,                             // push constant range
+            nullptr                        // push constants
         };
 
-        if (vkCreatePipelineLayout(m_device, &computePipelineLayoutInfo, nullptr, &computePipelineLayout) != VK_SUCCESS)
+        if (vkCreatePipelineLayout(m_device, &computePipelineLayoutInfo, nullptr, &m_computePipelineLayout) != VK_SUCCESS)
             throw std::runtime_error("failed to create pipeline layout!");
 
         VkComputePipelineCreateInfo computePipelineInfo{
@@ -254,7 +445,7 @@ private:
             nullptr,
             0,
             computeShaderStageInfo,
-            computePipelineLayout,
+            m_computePipelineLayout,
             VK_NULL_HANDLE,
             0
         };
@@ -263,9 +454,9 @@ private:
 
         // std::clog << "number of compute pipeline create infos: " << computePipelineInfos.size() << std::endl;
 
-        computePipelines.resize(computePipelineInfos.size());
+        m_computePipelines.resize(computePipelineInfos.size());
 
-        if (vkCreateComputePipelines(m_device, nullptr, computePipelineInfos.size(), computePipelineInfos.data(), nullptr, computePipelines.data()) != VK_SUCCESS)
+        if (vkCreateComputePipelines(m_device, nullptr, computePipelineInfos.size(), computePipelineInfos.data(), nullptr, m_computePipelines.data()) != VK_SUCCESS)
             throw std::runtime_error("failed to create compute pipeline!");
 
         vkDestroyShaderModule(m_device, computeShaderModule, nullptr);
@@ -288,11 +479,6 @@ private:
         success = true;
 
         return success;
-    }
-
-    void createManualFramebuffer()
-    {
-
     }
 
     void createImageViews()
@@ -420,6 +606,7 @@ private:
 
         vkGetDeviceQueue(m_device, indices.graphicsFamily.value(), 0, &m_graphicsQueue);
         vkGetDeviceQueue(m_device, indices.presentFamily.value(), 0, &m_presentQueue);
+        vkGetDeviceQueue(m_device, indices.computeFamily.value(), 0, &m_computeQueue);
     }
 
     void choosePhysicalDevice()
@@ -516,13 +703,20 @@ private:
     void cleanup()
     {
         vkDeviceWaitIdle(m_device);
-        vkDestroyDescriptorSetLayout(m_device, computeDescriptorSetLayout, nullptr);
+
+        // Images
+        vkFreeMemory(m_device, m_memory_computeImage, nullptr);
+        vkDestroyImageView(m_device, m_computeImageView, nullptr);
+        vkDestroyImage(m_device, m_computeImage, nullptr);
+
+        vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
+        vkDestroyDescriptorSetLayout(m_device, m_computeDescriptorSetLayout, nullptr);
         vkDestroyCommandPool(m_device, commandPool, nullptr);
 
         // pipeline objects
-        for (auto pipeline : computePipelines)
+        for (auto pipeline : m_computePipelines)
             vkDestroyPipeline(m_device, pipeline, nullptr);
-        vkDestroyPipelineLayout(m_device, computePipelineLayout, nullptr);
+        vkDestroyPipelineLayout(m_device, m_computePipelineLayout, nullptr);
 
         for (VkImageView &imageView : m_swapChainImageViews)
             vkDestroyImageView(m_device, imageView, nullptr);
@@ -742,6 +936,9 @@ private:
 
     VkSurfaceFormatKHR chooseSwapChainFormat(std::vector<VkSurfaceFormatKHR> &availableFormats)
     {
+        std::clog << "Available swapchain image formats: " << std::endl;
+        for (const auto &format : availableFormats)
+            std::clog << "\t" << format.format << std::endl;
 
         for (const auto &format : availableFormats)
         {
