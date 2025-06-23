@@ -74,6 +74,7 @@ private:
     VkDescriptorSetLayout m_computeDescriptorSetLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
     VkDescriptorSet m_descriptorSet = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSetLayout> m_graphicsDescriptorSetLayouts{};
 
     VkRenderPass m_renderPass = VK_NULL_HANDLE;
     VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
@@ -92,8 +93,9 @@ private:
     VkImageView m_computeImageView = VK_NULL_HANDLE;
 
     // testing variables
-    VkSemaphore testSemaphore;
-    VkFence testFence;
+    VkSemaphore imageAvailableSemaphore;
+    VkSemaphore presentationReadySemaphore;
+    VkFence drawingFinishedFence;
     uint32_t currentImageIndex;
 
     struct QueueFamilyIndices
@@ -155,6 +157,7 @@ private:
         createSwapChain();
         createImageViews();
         createResources();
+        createSyncObjects();
         createRenderPass();
         createFramebuffers();
         createGraphicsPipeline();
@@ -163,6 +166,16 @@ private:
         testOutComputePipeline();
     }
 
+    void createSyncObjects()
+    {
+        VkSemaphoreCreateInfo imageAvailableSemaphoreInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, nullptr, 0 };
+        VkSemaphoreCreateInfo presentationReadySemaphoreInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, nullptr, 0 };
+        VK_CHECK(vkCreateSemaphore(m_device, &imageAvailableSemaphoreInfo, nullptr, &imageAvailableSemaphore));
+        VK_CHECK(vkCreateSemaphore(m_device, &presentationReadySemaphoreInfo, nullptr, &presentationReadySemaphore));
+
+        VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, 0 }; // VK_FENCE_CREATE_SIGNALED_BIT };
+        VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &drawingFinishedFence));
+    }
     void createFramebuffers()
     {
         m_framebuffers.resize(m_swapChainImageViews.size());
@@ -196,7 +209,7 @@ private:
                                                             VK_ATTACHMENT_LOAD_OP_DONT_CARE,
                                                             VK_ATTACHMENT_STORE_OP_DONT_CARE,
                                                             VK_IMAGE_LAYOUT_UNDEFINED,
-                                                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL } };
+                                                            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR } };
 
         std::vector<VkAttachmentReference> attachmentReferences{ { 0,
                                                                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL } };
@@ -300,9 +313,6 @@ private:
             1.0f
         };
 
-        std::vector<VkDescriptorSetLayout> descriptorSetLayouts{};
-        VkDescriptorSetLayout graphicsDescriptorSetLayout;
-
         VkDescriptorSetLayoutBinding vertexBufferDescriptorSetBinding{
             0,
             VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
@@ -329,15 +339,15 @@ private:
             graphicsDescriptorSetBindings.data()
         };
 
-        VK_CHECK(vkCreateDescriptorSetLayout(m_device, &graphicsDescriptorSetLayoutInfo, nullptr, &graphicsDescriptorSetLayout));
-        descriptorSetLayouts.push_back(graphicsDescriptorSetLayout);
+        m_graphicsDescriptorSetLayouts.resize(1);
+        VK_CHECK(vkCreateDescriptorSetLayout(m_device, &graphicsDescriptorSetLayoutInfo, nullptr, &m_graphicsDescriptorSetLayouts[0]));
 
         VkPipelineLayoutCreateInfo graphicsPipelineLayoutInfo{
             VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             nullptr,
             0,
             1,
-            descriptorSetLayouts.data(),
+            m_graphicsDescriptorSetLayouts.data(),
             0,
             nullptr
         };
@@ -387,6 +397,9 @@ private:
             0
         };
         VK_CHECK(vkCreateGraphicsPipelines(m_device, nullptr, 1, &graphicsPipelineInfo, nullptr, &m_graphicsPipeline));
+
+        vkDestroyShaderModule(m_device, vertexModule, nullptr);
+        vkDestroyShaderModule(m_device, fragmentModule, nullptr);
     }
 
     void createResources()
@@ -468,55 +481,6 @@ private:
 
     void testOutComputePipeline()
     {
-        QueueFamilyIndices indices = findQueueFamilies(m_physicalDevice);
-
-        VkCommandBufferBeginInfo beginInfo{
-            VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            nullptr,
-            0,
-            nullptr
-        };
-
-        VkImageMemoryBarrier imageMemoryBarrier{
-            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            nullptr,
-            VK_ACCESS_SHADER_WRITE_BIT,
-            VK_ACCESS_SHADER_WRITE_BIT,
-            VK_IMAGE_LAYOUT_UNDEFINED,
-            VK_IMAGE_LAYOUT_GENERAL,
-            VK_QUEUE_FAMILY_IGNORED,
-            VK_QUEUE_FAMILY_IGNORED,
-            m_computeImage,
-            VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS }
-        };
-
-        vkBeginCommandBuffer(m_commandBuffers[0], &beginInfo);
-        vkCmdBindPipeline(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipelines[0]);
-        vkCmdPipelineBarrier(m_commandBuffers[0], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
-        vkCmdBindDescriptorSets(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipelineLayout, 0, 1, &m_descriptorSet, 0, nullptr);
-        vkCmdDispatch(m_commandBuffers[0], 64, 1, 1); // a linear work group of 64x1x1 invocations
-        vkEndCommandBuffer(m_commandBuffers[0]);
-
-        VkFence fence;
-        VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, 0 };
-        VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &fence));
-        VkSubmitInfo submitInfo{
-            VK_STRUCTURE_TYPE_SUBMIT_INFO,
-            nullptr,
-            0,
-            nullptr,
-            nullptr,
-            1,
-            m_commandBuffers.data(),
-            0,
-            nullptr
-        };
-        VK_CHECK(vkQueueSubmit(m_computeQueue, 1, &submitInfo, fence));
-        VK_CHECK(vkWaitForFences(m_device, 1, &fence, VK_TRUE, UINT64_MAX));
-        vkDestroyFence(m_device, fence, nullptr);
-
-        vkDeviceWaitIdle(m_device);
-        // std::clog << "all compute commands have been completed by the device" << std::endl;
     }
 
     void createCommandPool()
@@ -925,35 +889,20 @@ private:
     }
     void mainLoop()
     {
-        // single run through test
-        acquireImage();
-        drawFrame();
-        present();
 
         while (!glfwWindowShouldClose(m_window))
         {
             glfwPollEvents();
+            acquireImage();
+            drawFrame();
+            present();
         }
     }
 
     void acquireImage()
     {
-        VkSemaphoreCreateInfo testSemaphoreInfo{
-            VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-            nullptr,
-            0
-        };
-        VK_CHECK(vkCreateSemaphore(m_device, &testSemaphoreInfo, nullptr, &testSemaphore));
-
-        VkFenceCreateInfo testFenceInfo{
-            VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-            nullptr,
-            0
-        };
-        VK_CHECK(vkCreateFence(m_device, &testFenceInfo, nullptr, &testFence));
-
-        VK_CHECK(vkAcquireNextImageKHR(m_device, m_swapChain, UINT64_MAX, testSemaphore, testFence, &currentImageIndex));
-        std::clog << "swap chain image index: " << currentImageIndex << std::endl;
+        VK_CHECK(vkAcquireNextImageKHR(m_device, m_swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &currentImageIndex));
+        // std::clog << "swap chain image index: " << currentImageIndex << std::endl;
     }
 
     void drawFrame()
@@ -1008,20 +957,20 @@ private:
 
         VK_CHECK(vkEndCommandBuffer(m_commandBuffers[0]));
 
-        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_NONE };
+        VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 
         VkSubmitInfo submitInfo{
             VK_STRUCTURE_TYPE_SUBMIT_INFO,
             nullptr,
-            0,
-            nullptr,
+            1,
+            &imageAvailableSemaphore,
             waitStages,
             1,
             m_commandBuffers.data(),
-            0,
-            nullptr
+            1,
+            &presentationReadySemaphore
         };
-        VK_CHECK(vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE));
+        VK_CHECK(vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, drawingFinishedFence));
     }
 
     void present()
@@ -1031,7 +980,7 @@ private:
             VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
             nullptr,
             1,
-            &testSemaphore,
+            &presentationReadySemaphore,
             1,
             &m_swapChain,
             &currentImageIndex,
@@ -1039,11 +988,22 @@ private:
         };
 
         VK_CHECK(vkQueuePresentKHR(m_graphicsQueue, &presentInfo));
+        VK_CHECK(vkWaitForFences(m_device, 1, &drawingFinishedFence, VK_TRUE, INT64_MAX));
+        VK_CHECK(vkResetFences(m_device, 1, &drawingFinishedFence));
     }
 
     void cleanup()
     {
         vkDeviceWaitIdle(m_device);
+
+        vkDestroySemaphore(m_device, imageAvailableSemaphore, nullptr);
+        vkDestroySemaphore(m_device, presentationReadySemaphore, nullptr);
+        vkDestroyFence(m_device, drawingFinishedFence, nullptr);
+
+        vkDestroyPipelineLayout(m_device, m_graphicsPipelineLayout, nullptr);
+        vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
+        for (auto descriptorSetLayout : m_graphicsDescriptorSetLayouts)
+            vkDestroyDescriptorSetLayout(m_device, descriptorSetLayout, nullptr);
 
         for (auto framebuffer : m_framebuffers)
             vkDestroyFramebuffer(m_device, framebuffer, nullptr);
