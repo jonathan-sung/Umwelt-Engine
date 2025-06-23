@@ -10,7 +10,7 @@ VulkanFun : main.cpp
 .PHONY: run clean
 
 run: VulkanFun 
-	./$(NAME)
+	mangohud --dlsym ./$(NAME)
 
 clean:
 	rm -f $(NAME)
