@@ -140,6 +140,7 @@ private:
     struct Vertex
     {
         glm::vec2 position;
+        glm::vec3 color;
 
         static VkVertexInputBindingDescription getBindingDescription()
         {
@@ -150,13 +151,17 @@ private:
             return bindingDescription;
         }
 
-        static std::array<VkVertexInputAttributeDescription, 1> getAttributeDescriptions()
+        static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions()
         {
-            std::array<VkVertexInputAttributeDescription, 1> attributeDescriptions{};
+            std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
             attributeDescriptions[0].binding = 0;
             attributeDescriptions[0].location = 0;
             attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
             attributeDescriptions[0].offset = offsetof(Vertex, position);
+            attributeDescriptions[1].binding = 0;
+            attributeDescriptions[1].location = 1;
+            attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attributeDescriptions[1].offset = offsetof(Vertex, color);
             return attributeDescriptions;
         }
     };
@@ -214,7 +219,7 @@ private:
     void createGraphicsResources()
     {
         void *data;
-        Vertex vertices[] = { { { -1.0f, 1.0f } }, { { 1.0f, 1.0f } }, { { 1.0f, -1.0f } }, { { -1.0f, -1.0f } } };
+        Vertex vertices[] = { { { -1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } }, { { 1.0f, 1.0f }, { 0.0f, 1.0f, 0.0f } }, { { 1.0f, -1.0f }, { 0.0f, 0.0f, 1.0f } }, { { -1.0f, -1.0f }, { 1.0f, 0.0f, 1.0f } } };
 
         QueueFamilyIndices queueFamilies = findQueueFamilies(m_physicalDevice);
 
