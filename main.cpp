@@ -1,8 +1,11 @@
 #include <algorithm>
+#include <array>
 #include <bitset>
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <glm/detail/qualifier.hpp>
+#include <glm/ext/vector_float2.hpp>
 #include <limits>
 #include <optional>
 #include <string>
@@ -12,6 +15,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <glm/glm.hpp>
 #include <iostream>
 #include <memory>
 #include <ostream>
@@ -58,45 +62,61 @@ public:
 
 private:
     // Vulkan member variables
+
+    // General Vulkan objects
     VkInstance m_instance = VK_NULL_HANDLE;
     VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
     VkDevice m_device = VK_NULL_HANDLE;
+
+    // Graphics Pipeline
     VkQueue m_graphicsQueue = VK_NULL_HANDLE;
     VkQueue m_presentQueue = VK_NULL_HANDLE;
-    VkQueue m_computeQueue = VK_NULL_HANDLE;
+
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     std::vector<VkCommandBuffer> m_commandBuffers;
 
-    // Pipeline
-    std::vector<VkPipeline> m_computePipelines{};
-    VkPipelineLayout m_computePipelineLayout = VK_NULL_HANDLE;
+    VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
     VkPipelineLayout m_graphicsPipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorSetLayout m_computeDescriptorSetLayout = VK_NULL_HANDLE;
-    VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
-    VkDescriptorSet m_descriptorSet = VK_NULL_HANDLE;
+
+    VkDescriptorPool m_graphicsDescriptorPool = VK_NULL_HANDLE;
+    std::vector<VkDescriptorSet> m_graphicsDescriptorSets;
     std::vector<VkDescriptorSetLayout> m_graphicsDescriptorSetLayouts{};
 
     VkRenderPass m_renderPass = VK_NULL_HANDLE;
-    VkPipeline m_graphicsPipeline = VK_NULL_HANDLE;
-    std::vector<VkFramebuffer> m_framebuffers;
 
-    VkSurfaceKHR m_surface = VK_NULL_HANDLE;
-    VkSwapchainKHR m_swapChain = VK_NULL_HANDLE;
-    std::vector<VkImage> m_swapChainImages;
-    std::vector<VkImageView> m_swapChainImageViews;
-    VkFormat m_swapChainFormat;
-    VkExtent2D m_swapChainExtent;
-
-    // Resources
-    VkDeviceMemory m_memory_computeImage = VK_NULL_HANDLE;
-    VkImage m_computeImage = VK_NULL_HANDLE;
-    VkImageView m_computeImageView = VK_NULL_HANDLE;
-
-    // testing variables
     VkSemaphore imageAvailableSemaphore;
     VkSemaphore presentationReadySemaphore;
     VkFence drawingFinishedFence;
     uint32_t currentImageIndex;
+
+    // // Swapchain
+    VkSurfaceKHR m_surface = VK_NULL_HANDLE;
+    VkSwapchainKHR m_swapChain = VK_NULL_HANDLE;
+    std::vector<VkImage> m_swapChainImages;
+    std::vector<VkImageView> m_swapChainImageViews;
+    std::vector<VkFramebuffer> m_framebuffers;
+    VkFormat m_swapChainFormat;
+    VkExtent2D m_swapChainExtent;
+
+    // // Graphics Resources
+    VkDeviceMemory m_vertexBufferMemory;
+    VkBuffer m_vertexBuffer = VK_NULL_HANDLE;
+
+    // Compute Pipeline
+    VkQueue m_computeQueue = VK_NULL_HANDLE;
+
+    std::vector<VkPipeline> m_computePipelines{};
+    VkPipelineLayout m_computePipelineLayout = VK_NULL_HANDLE;
+
+    VkDescriptorPool m_computeDescriptorPool = VK_NULL_HANDLE;
+    VkDescriptorSet m_computeDescriptorSet = VK_NULL_HANDLE;
+    VkDescriptorSetLayout m_computeDescriptorSetLayout = VK_NULL_HANDLE;
+
+    // // Resources
+    VkDeviceMemory m_computeImageMemory = VK_NULL_HANDLE;
+    VkImage m_computeImage = VK_NULL_HANDLE;
+    VkImageView m_computeImageView = VK_NULL_HANDLE;
+    VkSampler m_computeImageSampler;
 
     struct QueueFamilyIndices
     {
@@ -115,6 +135,30 @@ private:
         VkSurfaceCapabilitiesKHR capabilities;
         std::vector<VkSurfaceFormatKHR> formats;
         std::vector<VkPresentModeKHR> presentModes;
+    };
+
+    struct Vertex
+    {
+        glm::vec2 position;
+
+        static VkVertexInputBindingDescription getBindingDescription()
+        {
+            VkVertexInputBindingDescription bindingDescription{};
+            bindingDescription.binding = 0;
+            bindingDescription.stride = sizeof(Vertex);
+            bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+            return bindingDescription;
+        }
+
+        static std::array<VkVertexInputAttributeDescription, 1> getAttributeDescriptions()
+        {
+            std::array<VkVertexInputAttributeDescription, 1> attributeDescriptions{};
+            attributeDescriptions[0].binding = 0;
+            attributeDescriptions[0].location = 0;
+            attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+            attributeDescriptions[0].offset = offsetof(Vertex, position);
+            return attributeDescriptions;
+        }
     };
 
     const std::vector<const char *> validationLayers{
@@ -160,10 +204,50 @@ private:
         createSyncObjects();
         createRenderPass();
         createFramebuffers();
-        createGraphicsPipeline();
+        createGraphicsResources();
         createComputePipeline();
-        createCommandPool();
         testOutComputePipeline();
+        createGraphicsPipeline();
+        createCommandPool();
+    }
+
+    void createGraphicsResources()
+    {
+        void *data;
+        Vertex vertices[] = { { { -1.0f, 1.0f } }, { { 1.0f, 1.0f } }, { { 1.0f, -1.0f } }, { { -1.0f, -1.0f } } };
+
+        QueueFamilyIndices queueFamilies = findQueueFamilies(m_physicalDevice);
+
+        VkBufferCreateInfo bufferInfo{
+            VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            nullptr,
+            0,
+            sizeof(vertices),
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+            VK_SHARING_MODE_EXCLUSIVE,
+            1,
+            &queueFamilies.graphicsFamily.value()
+        };
+
+        VK_CHECK(vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_vertexBuffer));
+
+        VkMemoryRequirements vertexBufferMemoryRequirements{};
+        vkGetBufferMemoryRequirements(m_device, m_vertexBuffer, &vertexBufferMemoryRequirements);
+
+        VkMemoryAllocateInfo vertexBufferAllocInfo{
+            VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            nullptr,
+            vertexBufferMemoryRequirements.size,
+            getMemoryTypeIndex(vertexBufferMemoryRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT).value()
+        };
+
+        VK_CHECK(vkAllocateMemory(m_device, &vertexBufferAllocInfo, nullptr, &m_vertexBufferMemory));
+
+        VK_CHECK(vkMapMemory(m_device, m_vertexBufferMemory, 0, VK_WHOLE_SIZE, 0, &data));
+        std::memcpy(data, vertices, sizeof(vertices));
+        vkUnmapMemory(m_device, m_vertexBufferMemory);
+
+        VK_CHECK(vkBindBufferMemory(m_device, m_vertexBuffer, m_vertexBufferMemory, 0));
     }
 
     void createSyncObjects()
@@ -173,7 +257,7 @@ private:
         VK_CHECK(vkCreateSemaphore(m_device, &imageAvailableSemaphoreInfo, nullptr, &imageAvailableSemaphore));
         VK_CHECK(vkCreateSemaphore(m_device, &presentationReadySemaphoreInfo, nullptr, &presentationReadySemaphore));
 
-        VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, 0 }; // VK_FENCE_CREATE_SIGNALED_BIT };
+        VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, nullptr, 0 };
         VK_CHECK(vkCreateFence(m_device, &fenceInfo, nullptr, &drawingFinishedFence));
     }
     void createFramebuffers()
@@ -267,21 +351,24 @@ private:
 
         std::vector<VkPipelineShaderStageCreateInfo> shaderStages{ vertexStageInfo, fragmentStageInfo };
 
+        auto bindingDescription = Vertex::getBindingDescription();
+        auto attributeDescription = Vertex::getAttributeDescriptions();
+
         VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo{
             VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
             nullptr,
             0,
-            0,
-            nullptr,
-            0,
-            nullptr
+            1,
+            &bindingDescription,
+            static_cast<uint32_t>(attributeDescription.size()),
+            attributeDescription.data()
         };
 
         VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateInfo{
             VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
             nullptr,
             0,
-            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
+            VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN,
             VK_FALSE
         };
         VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(m_swapChainExtent.width), static_cast<float>(m_swapChainExtent.height), 0.0f, 1.0f };
@@ -335,7 +422,7 @@ private:
             VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             nullptr,
             0,
-            static_cast<uint32_t>(graphicsDescriptorSetBindings.size()),
+            static_cast<uint32_t>(graphicsDescriptorSetBindings.size()), // 2; vertex buffer and input compute image
             graphicsDescriptorSetBindings.data()
         };
 
@@ -346,13 +433,72 @@ private:
             VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             nullptr,
             0,
-            1,
+            static_cast<uint32_t>(m_graphicsDescriptorSetLayouts.size()),
             m_graphicsDescriptorSetLayouts.data(),
             0,
             nullptr
         };
 
         VK_CHECK(vkCreatePipelineLayout(m_device, &graphicsPipelineLayoutInfo, nullptr, &m_graphicsPipelineLayout));
+
+        VkDescriptorPoolSize poolSizes[] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }, { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 } };
+
+        VkDescriptorPoolCreateInfo graphicsDescriptorPoolInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            nullptr,
+            0,
+            1,
+            2,
+            poolSizes
+        };
+        VK_CHECK(vkCreateDescriptorPool(m_device, &graphicsDescriptorPoolInfo, nullptr, &m_graphicsDescriptorPool));
+
+        VkDescriptorSetAllocateInfo descriptorSetAllocInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            nullptr,
+            m_graphicsDescriptorPool,
+            1,
+            m_graphicsDescriptorSetLayouts.data()
+        };
+
+        m_graphicsDescriptorSets.resize(m_graphicsDescriptorSetLayouts.size());
+        VK_CHECK(vkAllocateDescriptorSets(m_device, &descriptorSetAllocInfo, m_graphicsDescriptorSets.data()));
+
+        // RESUME - COME BACK TO HERE AFTER CREATE THE VERTEX BUFFER
+        VkDescriptorBufferInfo vertexBufferInfo{
+            m_vertexBuffer,
+            0,
+            VK_WHOLE_SIZE
+        };
+
+        VkDescriptorImageInfo computeImageInfo{
+            m_computeImageSampler,
+            m_computeImageView,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        };
+
+        std::vector<VkWriteDescriptorSet> graphicsWriteDescriptorSets{ { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                                                         nullptr,
+                                                                         m_graphicsDescriptorSets[0],
+                                                                         0,
+                                                                         0,
+                                                                         1,
+                                                                         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                                                         nullptr,
+                                                                         &vertexBufferInfo,
+                                                                         nullptr },
+                                                                       { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                                                         nullptr,
+                                                                         m_graphicsDescriptorSets[0],
+                                                                         1,
+                                                                         0,
+                                                                         1,
+                                                                         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                                                         &computeImageInfo,
+                                                                         nullptr,
+                                                                         nullptr } };
+
+        // vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(graphicsWriteDescriptorSets.size()), graphicsWriteDescriptorSets.data(), 0, nullptr);
 
         VkPipelineColorBlendAttachmentState colorAttachments{
             VK_FALSE,
@@ -362,7 +508,7 @@ private:
             VK_BLEND_FACTOR_SRC_ALPHA,
             VK_BLEND_FACTOR_SRC_ALPHA,
             VK_BLEND_OP_ADD,
-            0
+            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT
         };
 
         VkPipelineColorBlendStateCreateInfo colorBlendInfo{
@@ -461,9 +607,9 @@ private:
             getMemoryTypeIndex(imageMemoryRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT).value()
         };
 
-        VK_CHECK(vkAllocateMemory(m_device, &memoryAllocInfo, nullptr, &m_memory_computeImage));
+        VK_CHECK(vkAllocateMemory(m_device, &memoryAllocInfo, nullptr, &m_computeImageMemory));
 
-        VK_CHECK(vkBindImageMemory(m_device, m_computeImage, m_memory_computeImage, 0));
+        VK_CHECK(vkBindImageMemory(m_device, m_computeImage, m_computeImageMemory, 0));
 
         VkImageViewCreateInfo imageViewInfo{
             VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
@@ -491,7 +637,7 @@ private:
             VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
             nullptr,
             0,
-            indices.computeFamily.value()
+            indices.graphicsFamily.value()
         };
 
         if (vkCreateCommandPool(m_device, &commandPoolInfo, nullptr, &m_commandPool) != VK_SUCCESS)
@@ -589,17 +735,17 @@ private:
             &poolSize
         };
 
-        if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool))
+        if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_computeDescriptorPool))
             throw std::runtime_error("failed to create descriptor pool!");
 
         VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{
             VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
             nullptr,
-            m_descriptorPool,
+            m_computeDescriptorPool,
             1,
             &m_computeDescriptorSetLayout
         };
-        if (vkAllocateDescriptorSets(m_device, &descriptorSetAllocateInfo, &m_descriptorSet) != VK_SUCCESS)
+        if (vkAllocateDescriptorSets(m_device, &descriptorSetAllocateInfo, &m_computeDescriptorSet) != VK_SUCCESS)
             throw std::runtime_error("failed to allocate descriptor sets!");
 
         VkDescriptorImageInfo descriptorImageInfo{
@@ -611,7 +757,7 @@ private:
         VkWriteDescriptorSet writeDescriptorSetInfo{
             VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             nullptr,
-            m_descriptorSet,
+            m_computeDescriptorSet,
             0,
             0,
             1,
@@ -928,10 +1074,10 @@ private:
         VkImageMemoryBarrier swapchainImageBarrier{
             VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             nullptr,
-            VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
             VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
             VK_IMAGE_LAYOUT_UNDEFINED,
-            VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, // VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             VK_QUEUE_FAMILY_IGNORED,
             VK_QUEUE_FAMILY_IGNORED,
             m_swapChainImages[currentImageIndex],
@@ -951,8 +1097,11 @@ private:
             &clearValue
         };
 
+        VkDeviceSize offsets[] = { 0 };
+
         vkCmdBeginRenderPass(m_commandBuffers[0], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-        vkCmdDraw(m_commandBuffers[0], 4, 0, 0, 0);
+        vkCmdBindVertexBuffers(m_commandBuffers[0], 0, 1, &m_vertexBuffer, offsets);
+        vkCmdDraw(m_commandBuffers[0], 4, 1, 0, 0);
         vkCmdEndRenderPass(m_commandBuffers[0]);
 
         VK_CHECK(vkEndCommandBuffer(m_commandBuffers[0]));
@@ -990,6 +1139,7 @@ private:
         VK_CHECK(vkQueuePresentKHR(m_graphicsQueue, &presentInfo));
         VK_CHECK(vkWaitForFences(m_device, 1, &drawingFinishedFence, VK_TRUE, INT64_MAX));
         VK_CHECK(vkResetFences(m_device, 1, &drawingFinishedFence));
+        VK_CHECK((vkResetDescriptorPool(m_device, m_graphicsDescriptorPool, 0)));
     }
 
     void cleanup()
@@ -1002,20 +1152,27 @@ private:
 
         vkDestroyPipelineLayout(m_device, m_graphicsPipelineLayout, nullptr);
         vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
+
         for (auto descriptorSetLayout : m_graphicsDescriptorSetLayouts)
             vkDestroyDescriptorSetLayout(m_device, descriptorSetLayout, nullptr);
+
+        vkDestroyDescriptorPool(m_device, m_graphicsDescriptorPool, nullptr);
 
         for (auto framebuffer : m_framebuffers)
             vkDestroyFramebuffer(m_device, framebuffer, nullptr);
 
         vkDestroyRenderPass(m_device, m_renderPass, nullptr);
 
+        // Buffers
+        vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
+        vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
+
         // Images
-        vkFreeMemory(m_device, m_memory_computeImage, nullptr);
+        vkFreeMemory(m_device, m_computeImageMemory, nullptr);
         vkDestroyImageView(m_device, m_computeImageView, nullptr);
         vkDestroyImage(m_device, m_computeImage, nullptr);
 
-        vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
+        vkDestroyDescriptorPool(m_device, m_computeDescriptorPool, nullptr);
         vkDestroyDescriptorSetLayout(m_device, m_computeDescriptorSetLayout, nullptr);
         vkDestroyCommandPool(m_device, m_commandPool, nullptr);
 
@@ -1324,31 +1481,41 @@ private:
 
     std::optional<uint32_t> getMemoryTypeIndex(const VkMemoryRequirements &memoryRequirements, const VkMemoryPropertyFlags &requiredFlags)
     {
+        bool enableConsoleOutput = false;
         std::optional<uint32_t> selectedMemoryType;
 
-        // std::clog << "memory requirements:\n";
-        // std::clog << "\t suitable memory type index bits: " << std::bitset<32>(memoryRequirements.memoryTypeBits) << std::endl;
-        // std::clog << "\t memory alignment: " << memoryRequirements.alignment << std::endl;
-        // std::clog << "\t memory size: " << memoryRequirements.size << std::endl;
+        if (enableConsoleOutput)
+        {
+            std::clog << "memory requirements:\n";
+            std::clog << "\t suitable memory type index bits: " << std::bitset<32>(memoryRequirements.memoryTypeBits) << std::endl;
+            std::clog << "\t memory alignment: " << memoryRequirements.alignment << std::endl;
+            std::clog << "\t memory size: " << memoryRequirements.size << std::endl;
+        }
 
         VkPhysicalDeviceMemoryProperties memoryProperties{};
         vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memoryProperties);
 
-        for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++)
+        // for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++)
+        for (uint32_t i = 0; i < VK_MAX_MEMORY_TYPES; i++)
         {
             bool currentMemoryTypeSupported = memoryRequirements.memoryTypeBits & (1 << i);
             bool allRequiredFlagsAvailable = (memoryProperties.memoryTypes[i].propertyFlags & requiredFlags) == requiredFlags;
-            // std::clog << "suitable memory bits: \t" << std::bitset<32>(memoryRequirements.memoryTypeBits) << std::endl;
-            // std::clog << "current bit: \t\t" << std::bitset<32>(1 << i) << std::endl;
-            // std::clog << "memory property flags: \t" << std::bitset<32>(memoryProperties.memoryTypes[i].propertyFlags) << std::endl;
-            // std::clog << "required flags: \t" << std::bitset<32>(requiredFlags) << std::endl;
-            // std::clog << "memory heap flags: \t" << std::bitset<32>(memoryProperties.memoryHeaps[memoryProperties.memoryTypes[i].heapIndex].flags) << std::endl;
-            // std::clog << "memory heap index: \t" << (memoryProperties.memoryTypes[i].heapIndex) << std::endl;
-            // std::clog << "memory heap size: \t" << (memoryProperties.memoryHeaps[memoryProperties.memoryTypes[i].heapIndex].size) << std::endl;
-            // std::clog << std::endl;
+            if (enableConsoleOutput)
+            {
+                std::clog << "memory type count: \t" << memoryProperties.memoryTypeCount << std::endl;
+                std::clog << "suitable memory bits: \t" << std::bitset<32>(memoryRequirements.memoryTypeBits) << std::endl;
+                std::clog << "current bit: \t\t" << std::bitset<32>(1 << i) << std::endl;
+                std::clog << "memory property flags: \t" << std::bitset<32>(memoryProperties.memoryTypes[i].propertyFlags) << std::endl;
+                std::clog << "required flags: \t" << std::bitset<32>(requiredFlags) << std::endl;
+                std::clog << "memory heap flags: \t" << std::bitset<32>(memoryProperties.memoryHeaps[memoryProperties.memoryTypes[i].heapIndex].flags) << std::endl;
+                std::clog << "memory heap index: \t" << (memoryProperties.memoryTypes[i].heapIndex) << std::endl;
+                std::clog << "memory heap size: \t" << (memoryProperties.memoryHeaps[memoryProperties.memoryTypes[i].heapIndex].size) << "\n\n";
+            }
             if (allRequiredFlagsAvailable && currentMemoryTypeSupported)
             {
                 selectedMemoryType = i;
+                if (enableConsoleOutput)
+                    std::clog << "\t\tSelected Memory Type: " << selectedMemoryType.value() << std::endl;
                 break;
             }
         }
@@ -1374,7 +1541,9 @@ private:
 
 int main()
 {
-    std::unique_ptr<Game> game = std::make_unique<Game>(800, 600);
+    // std::unique_ptr<Game> game = std::make_unique<Game>(1920, 1080);
+    std::unique_ptr<Game> game = std::make_unique<Game>(2560, 1440);
+    // std::unique_ptr<Game> game = std::make_unique<Game>(1600, 1200);
     game->run();
     return EXIT_SUCCESS;
 }
