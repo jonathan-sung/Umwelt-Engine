@@ -1,6 +1,6 @@
-# Plan
+# Path Tracing with Vulkan
 
-1. Compute shader path tracing and output to VkImage
-2. Graphics pipeline
-    2.1 fill screen with two triangles
-    2.2 sample texture onto the triangles; that texture being the VkImage produced by the compute shader
+This project demonstrates a simple path tracing implementation using Vulkan. It consists of two main components:
+
+1. A compute shader that performs path tracing and outputs the result to a `VkImage`.
+2. A graphics pipeline that fills the screen with two triangles and samples a texture, which is the `VkImage` produced by the compute shader.
