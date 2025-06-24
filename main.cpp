@@ -101,6 +101,13 @@ private:
     // // Graphics Resources
     VkDeviceMemory m_vertexBufferMemory;
     VkBuffer m_vertexBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory m_uniformBufferMemory;
+    VkBuffer m_uniformBuffer = VK_NULL_HANDLE;
+
+    VkDeviceMemory m_presentImageMemory = VK_NULL_HANDLE;
+    VkImage m_presentImage = VK_NULL_HANDLE;
+    VkImageView m_presentImageView = VK_NULL_HANDLE;
+    VkSampler m_presentImageSampler = VK_NULL_HANDLE;
 
     // Compute Pipeline
     VkQueue m_computeQueue = VK_NULL_HANDLE;
@@ -116,7 +123,6 @@ private:
     VkDeviceMemory m_computeImageMemory = VK_NULL_HANDLE;
     VkImage m_computeImage = VK_NULL_HANDLE;
     VkImageView m_computeImageView = VK_NULL_HANDLE;
-    VkSampler m_computeImageSampler;
 
     struct QueueFamilyIndices
     {
@@ -203,20 +209,219 @@ private:
         createSurface();
         choosePhysicalDevice();
         createLogicalDevice();
+
         createSwapChain();
         createImageViews();
-        createResources();
         createSyncObjects();
         createRenderPass();
         createFramebuffers();
-        createGraphicsResources();
+
+        // Compute
+        createComputeResources();
+        createComputeDescriptorSets();
         createComputePipeline();
-        testOutComputePipeline();
+
+        // Graphics
+        createGraphicsResources();
+        createGraphicsDescriptorSets();
         createGraphicsPipeline();
+
         createCommandPool();
     }
+    void createComputeDescriptorSets()
+    {
+        VkDescriptorSetLayoutBinding bindings{
+            0,
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            1,
+            VK_SHADER_STAGE_COMPUTE_BIT,
+            nullptr
+        };
 
-    void createGraphicsResources()
+        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            nullptr,
+            0,
+            1,
+            &bindings
+        };
+        VK_CHECK(vkCreateDescriptorSetLayout(m_device, &descriptorSetLayoutInfo, nullptr, &m_computeDescriptorSetLayout));
+
+        VkDescriptorPoolSize poolSize{ VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1 };
+
+        VkDescriptorPoolCreateInfo descriptorPoolInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            nullptr,
+            0,
+            1,
+            1,
+            &poolSize
+        };
+
+        VK_CHECK(vkCreateDescriptorPool(m_device, &descriptorPoolInfo, nullptr, &m_computeDescriptorPool));
+
+        VkDescriptorSetAllocateInfo descriptorSetAllocInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            nullptr,
+            m_computeDescriptorPool,
+            1,
+            &m_computeDescriptorSetLayout
+        };
+        VK_CHECK(vkAllocateDescriptorSets(m_device, &descriptorSetAllocInfo, &m_computeDescriptorSet));
+
+        VkDescriptorImageInfo imageInfo{
+            nullptr,
+            m_computeImageView,
+            VK_IMAGE_LAYOUT_GENERAL
+        };
+
+        VkWriteDescriptorSet descriptorWrites{
+            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            nullptr,
+            m_computeDescriptorSet,
+            0,
+            0,
+            1,
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            &imageInfo,
+            nullptr,
+            nullptr
+        };
+
+        vkUpdateDescriptorSets(m_device, 1, &descriptorWrites, 0, nullptr);
+    }
+
+    void createGraphicsDescriptorSets()
+    {
+        VkDescriptorSetLayoutBinding uniformBufferDescriptorSetBinding{
+            0,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            1,
+            VK_SHADER_STAGE_ALL,
+            nullptr
+        };
+
+        VkDescriptorSetLayoutBinding presentImageDescriptorSetBinding{
+            1,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            1,
+            VK_SHADER_STAGE_FRAGMENT_BIT,
+            nullptr
+        };
+
+        std::vector<VkDescriptorSetLayoutBinding> graphicsDescriptorSetBindings = { uniformBufferDescriptorSetBinding, presentImageDescriptorSetBinding };
+
+        VkDescriptorSetLayoutCreateInfo graphicsDescriptorSetLayoutInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            nullptr,
+            0,
+            static_cast<uint32_t>(graphicsDescriptorSetBindings.size()), // 2; uniform buffer and input present image
+            graphicsDescriptorSetBindings.data()
+        };
+
+        m_graphicsDescriptorSetLayouts.resize(1);
+        VK_CHECK(vkCreateDescriptorSetLayout(m_device, &graphicsDescriptorSetLayoutInfo, nullptr, &m_graphicsDescriptorSetLayouts[0]));
+
+        VkDescriptorPoolSize poolSizes[] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }, { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 } };
+
+        VkDescriptorPoolCreateInfo graphicsDescriptorPoolInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            nullptr,
+            0,
+            1,
+            2,
+            poolSizes
+        };
+        VK_CHECK(vkCreateDescriptorPool(m_device, &graphicsDescriptorPoolInfo, nullptr, &m_graphicsDescriptorPool));
+
+        VkDescriptorSetAllocateInfo descriptorSetAllocInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            nullptr,
+            m_graphicsDescriptorPool,
+            1,
+            m_graphicsDescriptorSetLayouts.data()
+        };
+
+        m_graphicsDescriptorSets.resize(m_graphicsDescriptorSetLayouts.size());
+        VK_CHECK(vkAllocateDescriptorSets(m_device, &descriptorSetAllocInfo, m_graphicsDescriptorSets.data()));
+
+        // RESUME - COME BACK TO HERE AFTER CREATE THE VERTEX BUFFER
+        VkDescriptorBufferInfo uniformBufferInfo{
+            m_uniformBuffer,
+            0,
+            VK_WHOLE_SIZE
+        };
+
+        VkDescriptorImageInfo presentImageInfo{
+            m_presentImageSampler,
+            m_presentImageView,
+            VK_IMAGE_LAYOUT_GENERAL
+        };
+
+        std::vector<VkWriteDescriptorSet> graphicsWriteDescriptorSets{ { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                                                         nullptr,
+                                                                         m_graphicsDescriptorSets[0],
+                                                                         0,
+                                                                         0,
+                                                                         1,
+                                                                         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                                                         nullptr,
+                                                                         &uniformBufferInfo,
+                                                                         nullptr },
+                                                                       { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                                                                         nullptr,
+                                                                         m_graphicsDescriptorSets[0],
+                                                                         1,
+                                                                         0,
+                                                                         1,
+                                                                         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                                                         &presentImageInfo,
+                                                                         nullptr,
+                                                                         nullptr } };
+
+        vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(graphicsWriteDescriptorSets.size()), graphicsWriteDescriptorSets.data(), 0, nullptr);
+    }
+
+    void createUniformBuffer()
+    {
+        void *data;
+        float stuff[] = { 69.0f };
+
+        QueueFamilyIndices queueFamilies = findQueueFamilies(m_physicalDevice);
+
+        VkBufferCreateInfo bufferInfo{
+            VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            nullptr,
+            0,
+            sizeof(stuff),
+            VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+            VK_SHARING_MODE_EXCLUSIVE,
+            1,
+            &queueFamilies.graphicsFamily.value()
+        };
+
+        VK_CHECK(vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_uniformBuffer));
+
+        VkMemoryRequirements uniformBufferMemoryRequirements{};
+        vkGetBufferMemoryRequirements(m_device, m_uniformBuffer, &uniformBufferMemoryRequirements);
+
+        VkMemoryAllocateInfo uniformBufferAllocInfo{
+            VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            nullptr,
+            uniformBufferMemoryRequirements.size,
+            getMemoryTypeIndex(uniformBufferMemoryRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT).value()
+        };
+
+        VK_CHECK(vkAllocateMemory(m_device, &uniformBufferAllocInfo, nullptr, &m_uniformBufferMemory));
+
+        VK_CHECK(vkBindBufferMemory(m_device, m_uniformBuffer, m_uniformBufferMemory, 0));
+
+        VK_CHECK(vkMapMemory(m_device, m_uniformBufferMemory, 0, VK_WHOLE_SIZE, 0, &data));
+        std::memcpy(data, stuff, sizeof(stuff));
+        vkUnmapMemory(m_device, m_uniformBufferMemory);
+    }
+
+    void createVertexBuffer()
     {
         void *data;
         Vertex vertices[] = { { { -1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } }, { { 1.0f, 1.0f }, { 0.0f, 1.0f, 0.0f } }, { { 1.0f, -1.0f }, { 0.0f, 0.0f, 1.0f } }, { { -1.0f, -1.0f }, { 1.0f, 0.0f, 1.0f } } };
@@ -248,11 +453,97 @@ private:
 
         VK_CHECK(vkAllocateMemory(m_device, &vertexBufferAllocInfo, nullptr, &m_vertexBufferMemory));
 
+        VK_CHECK(vkBindBufferMemory(m_device, m_vertexBuffer, m_vertexBufferMemory, 0));
+
         VK_CHECK(vkMapMemory(m_device, m_vertexBufferMemory, 0, VK_WHOLE_SIZE, 0, &data));
         std::memcpy(data, vertices, sizeof(vertices));
         vkUnmapMemory(m_device, m_vertexBufferMemory);
+    }
 
-        VK_CHECK(vkBindBufferMemory(m_device, m_vertexBuffer, m_vertexBufferMemory, 0));
+    void createImageSampler()
+    {
+        VkSamplerCreateInfo samplerInfo{
+            VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            nullptr,
+            0,
+            VK_FILTER_NEAREST, // change this to linear if it looks blocky
+            VK_FILTER_NEAREST,
+            VK_SAMPLER_MIPMAP_MODE_NEAREST,
+            VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+            VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+            VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER,
+            0.0f,
+            VK_FALSE,
+            1.0f,
+            VK_FALSE,
+            VK_COMPARE_OP_ALWAYS,
+            0.0f,
+            0.0f,
+            VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+            VK_FALSE
+        };
+        VK_CHECK(vkCreateSampler(m_device, &samplerInfo, nullptr, &m_presentImageSampler));
+    }
+
+    void createGraphicsResources()
+    {
+        createVertexBuffer();
+        createUniformBuffer();
+        createImageSampler();
+        createPresentImage();
+    }
+
+    void createPresentImage()
+    {
+        VkImageCreateInfo imageInfo{
+            VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            nullptr,
+            0,
+            VK_IMAGE_TYPE_2D,
+            VK_FORMAT_B8G8R8A8_UNORM,
+            VkExtent3D{ m_width, m_height, 1 },
+            1,
+            1,
+            VK_SAMPLE_COUNT_1_BIT,
+            VK_IMAGE_TILING_OPTIMAL,
+            VK_IMAGE_USAGE_SAMPLED_BIT,
+            VK_SHARING_MODE_EXCLUSIVE,
+            0,
+            nullptr,
+            VK_IMAGE_LAYOUT_UNDEFINED
+        };
+
+        VK_CHECK(vkCreateImage(m_device, &imageInfo, nullptr, &m_presentImage));
+
+        VkMemoryRequirements imageMemoryRequirements{};
+
+        vkGetImageMemoryRequirements(m_device, m_presentImage, &imageMemoryRequirements);
+
+        // std::clog << "REQUIRED SIZE: " << imageMemoryRequirements.size << std::endl;
+
+        VkMemoryAllocateInfo memoryAllocInfo{
+            VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+            nullptr,
+            imageMemoryRequirements.size,
+            getMemoryTypeIndex(imageMemoryRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT).value()
+        };
+
+        VK_CHECK(vkAllocateMemory(m_device, &memoryAllocInfo, nullptr, &m_presentImageMemory));
+
+        VK_CHECK(vkBindImageMemory(m_device, m_presentImage, m_presentImageMemory, 0));
+
+        VkImageViewCreateInfo imageViewInfo{
+            VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            nullptr,
+            0,
+            m_presentImage,
+            VK_IMAGE_VIEW_TYPE_2D,
+            VK_FORMAT_B8G8R8A8_UNORM,
+            VkComponentMapping{ VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY, VK_COMPONENT_SWIZZLE_IDENTITY },
+            VkImageSubresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+        };
+
+        VK_CHECK(vkCreateImageView(m_device, &imageViewInfo, nullptr, &m_presentImageView));
     }
 
     void createSyncObjects()
@@ -405,35 +696,6 @@ private:
             1.0f
         };
 
-        VkDescriptorSetLayoutBinding vertexBufferDescriptorSetBinding{
-            0,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            1,
-            VK_SHADER_STAGE_VERTEX_BIT,
-            nullptr
-        };
-
-        VkDescriptorSetLayoutBinding computeImageDescriptorSetBinding{
-            1,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            1,
-            VK_SHADER_STAGE_FRAGMENT_BIT,
-            nullptr
-        };
-
-        std::vector<VkDescriptorSetLayoutBinding> graphicsDescriptorSetBindings = { vertexBufferDescriptorSetBinding, computeImageDescriptorSetBinding };
-
-        VkDescriptorSetLayoutCreateInfo graphicsDescriptorSetLayoutInfo{
-            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-            nullptr,
-            0,
-            static_cast<uint32_t>(graphicsDescriptorSetBindings.size()), // 2; vertex buffer and input compute image
-            graphicsDescriptorSetBindings.data()
-        };
-
-        m_graphicsDescriptorSetLayouts.resize(1);
-        VK_CHECK(vkCreateDescriptorSetLayout(m_device, &graphicsDescriptorSetLayoutInfo, nullptr, &m_graphicsDescriptorSetLayouts[0]));
-
         VkPipelineLayoutCreateInfo graphicsPipelineLayoutInfo{
             VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             nullptr,
@@ -445,65 +707,6 @@ private:
         };
 
         VK_CHECK(vkCreatePipelineLayout(m_device, &graphicsPipelineLayoutInfo, nullptr, &m_graphicsPipelineLayout));
-
-        VkDescriptorPoolSize poolSizes[] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }, { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 } };
-
-        VkDescriptorPoolCreateInfo graphicsDescriptorPoolInfo{
-            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-            nullptr,
-            0,
-            1,
-            2,
-            poolSizes
-        };
-        VK_CHECK(vkCreateDescriptorPool(m_device, &graphicsDescriptorPoolInfo, nullptr, &m_graphicsDescriptorPool));
-
-        VkDescriptorSetAllocateInfo descriptorSetAllocInfo{
-            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            nullptr,
-            m_graphicsDescriptorPool,
-            1,
-            m_graphicsDescriptorSetLayouts.data()
-        };
-
-        m_graphicsDescriptorSets.resize(m_graphicsDescriptorSetLayouts.size());
-        VK_CHECK(vkAllocateDescriptorSets(m_device, &descriptorSetAllocInfo, m_graphicsDescriptorSets.data()));
-
-        // RESUME - COME BACK TO HERE AFTER CREATE THE VERTEX BUFFER
-        VkDescriptorBufferInfo vertexBufferInfo{
-            m_vertexBuffer,
-            0,
-            VK_WHOLE_SIZE
-        };
-
-        VkDescriptorImageInfo computeImageInfo{
-            m_computeImageSampler,
-            m_computeImageView,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-        };
-
-        std::vector<VkWriteDescriptorSet> graphicsWriteDescriptorSets{ { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                                                         nullptr,
-                                                                         m_graphicsDescriptorSets[0],
-                                                                         0,
-                                                                         0,
-                                                                         1,
-                                                                         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                                                                         nullptr,
-                                                                         &vertexBufferInfo,
-                                                                         nullptr },
-                                                                       { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                                                                         nullptr,
-                                                                         m_graphicsDescriptorSets[0],
-                                                                         1,
-                                                                         0,
-                                                                         1,
-                                                                         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                                                         &computeImageInfo,
-                                                                         nullptr,
-                                                                         nullptr } };
-
-        // vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(graphicsWriteDescriptorSets.size()), graphicsWriteDescriptorSets.data(), 0, nullptr);
 
         VkPipelineColorBlendAttachmentState colorAttachments{
             VK_FALSE,
@@ -553,7 +756,7 @@ private:
         vkDestroyShaderModule(m_device, fragmentModule, nullptr);
     }
 
-    void createResources()
+    void createComputeResources()
     {
         // Check for suitable formats
         // for (uint32_t i = 0; i < 184; i++)
@@ -630,10 +833,6 @@ private:
         VK_CHECK(vkCreateImageView(m_device, &imageViewInfo, nullptr, &m_computeImageView));
     }
 
-    void testOutComputePipeline()
-    {
-    }
-
     void createCommandPool()
     {
         QueueFamilyIndices indices = findQueueFamilies(m_physicalDevice);
@@ -684,131 +883,43 @@ private:
 
     void createComputePipeline()
     {
-        VkShaderModule computeShaderModule = createShaderModule("shaders/test.spv");
+        VkShaderModule computeModule = createShaderModule("shaders/compute.spv");
 
-        // create compute pipeline
-        VkPipelineShaderStageCreateInfo computeShaderStageInfo{
+        VkPipelineShaderStageCreateInfo stageInfo{
             VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             nullptr,
             0,
             VK_SHADER_STAGE_COMPUTE_BIT,
-            computeShaderModule,
+            computeModule,
             "main",
-            nullptr // specialization info
-        };
-
-        // check limits
-        VkPhysicalDeviceLimits limits{};
-        VkPhysicalDeviceProperties properties;
-        vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
-        // std::clog << "max group size: " << properties.limits.maxComputeWorkGroupSize[0] << ", " << properties.limits.maxComputeWorkGroupSize[1] << ", " << properties.limits.maxComputeWorkGroupSize[2] << std::endl;
-        // std::clog << "max group count: " << properties.limits.maxComputeWorkGroupCount[0] << ", " << properties.limits.maxComputeWorkGroupCount[1] << ", " << properties.limits.maxComputeWorkGroupCount[2] << std::endl;
-        // std::clog << "max group invocations: " << properties.limits.maxComputeWorkGroupInvocations << std::endl;
-
-        // create descriptor sets
-
-        VkDescriptorSetLayoutBinding descriptorSetBinding{
-            0,
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            1,
-            VK_SHADER_STAGE_ALL,
             nullptr
         };
-
-        VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{
-            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-            nullptr,
-            0,
-            1,
-            &descriptorSetBinding
-        };
-
-        if (vkCreateDescriptorSetLayout(m_device, &descriptorSetLayoutInfo, nullptr, &m_computeDescriptorSetLayout) != VK_SUCCESS)
-            throw std::runtime_error("failed to create descriptor set layout!");
-
-        VkDescriptorPoolSize poolSize{
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            1
-        };
-
-        VkDescriptorPoolCreateInfo poolInfo{
-            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-            nullptr,
-            0,
-            1,
-            1,
-            &poolSize
-        };
-
-        if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_computeDescriptorPool))
-            throw std::runtime_error("failed to create descriptor pool!");
-
-        VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{
-            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            nullptr,
-            m_computeDescriptorPool,
-            1,
-            &m_computeDescriptorSetLayout
-        };
-        if (vkAllocateDescriptorSets(m_device, &descriptorSetAllocateInfo, &m_computeDescriptorSet) != VK_SUCCESS)
-            throw std::runtime_error("failed to allocate descriptor sets!");
-
-        VkDescriptorImageInfo descriptorImageInfo{
-            nullptr,
-            m_computeImageView,
-            VK_IMAGE_LAYOUT_GENERAL
-        };
-
-        VkWriteDescriptorSet writeDescriptorSetInfo{
-            VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            nullptr,
-            m_computeDescriptorSet,
-            0,
-            0,
-            1,
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            &descriptorImageInfo,
-            nullptr,
-            nullptr
-        };
-
-        vkUpdateDescriptorSets(m_device, 1, &writeDescriptorSetInfo, 0, nullptr);
-
-        // create compute pipeline
 
         VkPipelineLayoutCreateInfo computePipelineLayoutInfo{
             VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
             nullptr,
             0,
-            1,                             // set layout count
-            &m_computeDescriptorSetLayout, // descriptor set layouts
-            0,                             // push constant range
-            nullptr                        // push constants
+            1,
+            &m_computeDescriptorSetLayout,
+            0,
+            nullptr
         };
 
-        if (vkCreatePipelineLayout(m_device, &computePipelineLayoutInfo, nullptr, &m_computePipelineLayout) != VK_SUCCESS)
-            throw std::runtime_error("failed to create pipeline layout!");
+        VK_CHECK(vkCreatePipelineLayout(m_device, &computePipelineLayoutInfo, nullptr, &m_computePipelineLayout));
 
         VkComputePipelineCreateInfo computePipelineInfo{
             VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
             nullptr,
             0,
-            computeShaderStageInfo,
+            stageInfo,
             m_computePipelineLayout,
             VK_NULL_HANDLE,
-            0
+            -1
         };
 
-        std::vector<VkComputePipelineCreateInfo> computePipelineInfos{ computePipelineInfo };
-
-        // std::clog << "number of compute pipeline create infos: " << computePipelineInfos.size() << std::endl;
-
-        m_computePipelines.resize(computePipelineInfos.size());
-
-        if (vkCreateComputePipelines(m_device, nullptr, computePipelineInfos.size(), computePipelineInfos.data(), nullptr, m_computePipelines.data()) != VK_SUCCESS)
-            throw std::runtime_error("failed to create compute pipeline!");
-
-        vkDestroyShaderModule(m_device, computeShaderModule, nullptr);
+        m_computePipelines.resize(1);
+        VK_CHECK(vkCreateComputePipelines(m_device, nullptr, 1, &computePipelineInfo, nullptr, m_computePipelines.data()));
+        vkDestroyShaderModule(m_device, computeModule, nullptr);
     }
 
     bool createBlockOfMemory(uint32_t memoryType, VkDeviceSize size, VkDeviceMemory &memoryBlock)
@@ -1040,14 +1151,30 @@ private:
     }
     void mainLoop()
     {
-
         while (!glfwWindowShouldClose(m_window))
         {
             glfwPollEvents();
+            // TEST_updateUniformBuffer();
+
             acquireImage();
             drawFrame();
             present();
         }
+    }
+    void TEST_updateUniformBuffer()
+    {
+        void *data;
+        float stuff[] = { (float)glfwGetTime() };
+        VK_CHECK(vkMapMemory(m_device, m_uniformBufferMemory, 0, VK_WHOLE_SIZE, 0, &data));
+        std::memcpy(data, stuff, sizeof(stuff));
+        vkUnmapMemory(m_device, m_uniformBufferMemory);
+
+        // update vertex buffers
+
+        Vertex vertices[] = { { { -1.0f, 1.0f }, { 1.0f, 0.0f, 0.0f } }, { { 1.0f, 1.0f }, { 0.0f, 1.0f, 0.0f } }, { { 1.0f, -1.0f }, { 0.0f, 0.0f, 1.0f } }, { { -1.0f, -1.0f }, { 1.0f, 0.0f, 1.0f } } };
+        VK_CHECK(vkMapMemory(m_device, m_vertexBufferMemory, 0, VK_WHOLE_SIZE, 0, &data));
+        std::memcpy(data, vertices, sizeof(vertices));
+        vkUnmapMemory(m_device, m_vertexBufferMemory);
     }
 
     void acquireImage()
@@ -1058,16 +1185,13 @@ private:
 
     void drawFrame()
     {
-        VK_CHECK(vkResetCommandPool(m_device, m_commandPool, 0));
+        // VK_CHECK(vkResetCommandPool(m_device, m_commandPool, 0));
         VkCommandBufferBeginInfo beginInfo{
             VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
             nullptr,
             0,
             nullptr
         };
-        VK_CHECK(vkBeginCommandBuffer(m_commandBuffers[0], &beginInfo));
-        vkCmdBindPipeline(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
-
         VkImageSubresourceRange subresourceRange{
             VK_IMAGE_ASPECT_COLOR_BIT,
             0,
@@ -1089,9 +1213,7 @@ private:
             subresourceRange
         };
 
-        vkCmdPipelineBarrier(m_commandBuffers[0], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapchainImageBarrier);
-
-        VkClearValue clearValue = { 1.0f, 0.0f, 1.0f, 1.0f };
+        VkClearValue clearValue = { 1.0f, 1.0f, 1.0f, 1.0f };
         VkRenderPassBeginInfo renderPassBeginInfo{
             VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
             nullptr,
@@ -1104,6 +1226,14 @@ private:
 
         VkDeviceSize offsets[] = { 0 };
 
+        // Commands TODO
+        // 1. compute image
+        // 2. transfer image from Compute VkImage to Present VkImage
+        // 3. Sample the Present VkImage as a texture onto the full screen quad
+        VK_CHECK(vkBeginCommandBuffer(m_commandBuffers[0], &beginInfo));
+        vkCmdBindDescriptorSets(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineLayout, 0, m_graphicsDescriptorSets.size(), m_graphicsDescriptorSets.data(), 0, nullptr);
+        vkCmdBindPipeline(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+        vkCmdPipelineBarrier(m_commandBuffers[0], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapchainImageBarrier);
         vkCmdBeginRenderPass(m_commandBuffers[0], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindVertexBuffers(m_commandBuffers[0], 0, 1, &m_vertexBuffer, offsets);
         vkCmdDraw(m_commandBuffers[0], 4, 1, 0, 0);
@@ -1144,7 +1274,8 @@ private:
         VK_CHECK(vkQueuePresentKHR(m_graphicsQueue, &presentInfo));
         VK_CHECK(vkWaitForFences(m_device, 1, &drawingFinishedFence, VK_TRUE, INT64_MAX));
         VK_CHECK(vkResetFences(m_device, 1, &drawingFinishedFence));
-        VK_CHECK((vkResetDescriptorPool(m_device, m_graphicsDescriptorPool, 0)));
+        VK_CHECK(vkResetCommandPool(m_device, m_commandPool, 0));
+        // VK_CHECK(vkResetDescriptorPool(m_device, m_graphicsDescriptorPool, 0));
     }
 
     void cleanup()
@@ -1170,21 +1301,30 @@ private:
 
         // Buffers
         vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
+        vkFreeMemory(m_device, m_uniformBufferMemory, nullptr);
         vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
+        vkDestroyBuffer(m_device, m_uniformBuffer, nullptr);
 
         // Images
+
+        vkFreeMemory(m_device, m_presentImageMemory, nullptr);
+        vkDestroyImageView(m_device, m_presentImageView, nullptr);
+        vkDestroyImage(m_device, m_presentImage, nullptr);
+        vkDestroySampler(m_device, m_presentImageSampler, nullptr);
+
         vkFreeMemory(m_device, m_computeImageMemory, nullptr);
         vkDestroyImageView(m_device, m_computeImageView, nullptr);
         vkDestroyImage(m_device, m_computeImage, nullptr);
 
         vkDestroyDescriptorPool(m_device, m_computeDescriptorPool, nullptr);
         vkDestroyDescriptorSetLayout(m_device, m_computeDescriptorSetLayout, nullptr);
-        vkDestroyCommandPool(m_device, m_commandPool, nullptr);
 
         // pipeline objects
         for (auto pipeline : m_computePipelines)
             vkDestroyPipeline(m_device, pipeline, nullptr);
         vkDestroyPipelineLayout(m_device, m_computePipelineLayout, nullptr);
+
+        vkDestroyCommandPool(m_device, m_commandPool, nullptr);
 
         for (VkImageView &imageView : m_swapChainImageViews)
             vkDestroyImageView(m_device, imageView, nullptr);

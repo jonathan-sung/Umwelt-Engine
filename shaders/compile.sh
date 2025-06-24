@@ -1,4 +1,4 @@
-glslc test.comp -o test.spv
+glslc compute.comp -o compute.spv
 glslc vertex.vert -o vertex.spv
 glslc fragment.frag -o fragment.spv
 
