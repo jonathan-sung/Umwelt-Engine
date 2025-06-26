@@ -10,6 +10,7 @@ VulkanFun : main.cpp
 .PHONY: run clean
 
 run: VulkanFun 
+	./compile.sh
 	mangohud --dlsym ./$(NAME)
 
 clean:

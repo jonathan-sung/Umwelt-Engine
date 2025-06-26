@@ -355,7 +355,7 @@ private:
         VkDescriptorImageInfo presentImageInfo{
             m_presentImageSampler,
             m_presentImageView,
-            VK_IMAGE_LAYOUT_GENERAL
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         };
 
         std::vector<VkWriteDescriptorSet> graphicsWriteDescriptorSets{ { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
@@ -506,7 +506,7 @@ private:
             1,
             VK_SAMPLE_COUNT_1_BIT,
             VK_IMAGE_TILING_OPTIMAL,
-            VK_IMAGE_USAGE_SAMPLED_BIT,
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
             VK_SHARING_MODE_EXCLUSIVE,
             0,
             nullptr,
@@ -793,7 +793,7 @@ private:
             1,
             VK_SAMPLE_COUNT_1_BIT,
             VK_IMAGE_TILING_OPTIMAL, // CHANGE THIS BACK TO OPTIMAL IF IT WORKS
-            VK_IMAGE_USAGE_STORAGE_BIT,
+            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
             VK_SHARING_MODE_EXCLUSIVE, // change this if the graphics queue and compute queue are different
             0,
             nullptr,
@@ -1185,35 +1185,81 @@ private:
 
     void drawFrame()
     {
-        // VK_CHECK(vkResetCommandPool(m_device, m_commandPool, 0));
-        VkCommandBufferBeginInfo beginInfo{
-            VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-            nullptr,
-            0,
-            nullptr
-        };
-        VkImageSubresourceRange subresourceRange{
-            VK_IMAGE_ASPECT_COLOR_BIT,
-            0,
-            1,
-            0,
-            1
-        };
+        /*
+        - draw stuff into computeImage using compute shader
+            - move image from undefined to general layout, and from none to shader write
+            - write data into computeImage (temporary - cmdfillimage)
+                - set up cmd dispatch workgroup sizes and shizz
+                - write the GLSL shader code which actually does this stuff
+            - computeImage: move from general to transfer src layout, and from shader write to transfer read
+            - presentImage: move from undefined to transfer dst layout, and from none to transfer write // BUT WHAT ABOUT THE PREVIOUS FRAME? we're assuming that the images will start with undefined layout
+            - transfer computeImage into presentImage
+        - present image to screen
+            - presentImage: move from transfer dst layout to present layout
+        - reset everything back to normal
+            - set computeImage to undefined
+            - set presentImage to undefined
+            - reset command buffer individual using that special flag at creation
 
-        VkImageMemoryBarrier swapchainImageBarrier{
+        */
+        VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, 0, nullptr };
+        VkImageSubresourceRange subresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+        VkClearValue clearValue = { 1.0f, 1.0f, 1.0f, 1.0f };
+        VkClearColorValue redClearColorValue = { 1.0f, 0.0f, 0.0f, 1.0f };
+        VkDeviceSize offsets[] = { 0 };
+
+        VkImageMemoryBarrier computeImageBarrier{
             VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             nullptr,
-            VK_ACCESS_SHADER_READ_BIT,
-            VK_ACCESS_COLOR_ATTACHMENT_READ_BIT,
+            VK_ACCESS_NONE,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
             VK_IMAGE_LAYOUT_UNDEFINED,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, // VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            VK_IMAGE_LAYOUT_GENERAL,
             VK_QUEUE_FAMILY_IGNORED,
             VK_QUEUE_FAMILY_IGNORED,
-            m_swapChainImages[currentImageIndex],
+            m_computeImage,
             subresourceRange
         };
 
-        VkClearValue clearValue = { 1.0f, 1.0f, 1.0f, 1.0f };
+        VkImageMemoryBarrier transferComputeImageToPresentImageComputeBarrier{
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            nullptr,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT,
+            VK_IMAGE_LAYOUT_GENERAL,
+            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_QUEUE_FAMILY_IGNORED,
+            VK_QUEUE_FAMILY_IGNORED,
+            m_computeImage,
+            subresourceRange
+        };
+
+        VkImageMemoryBarrier transferComputeImageToPresentImagePresentBarrier{
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            nullptr,
+            VK_ACCESS_NONE,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_IMAGE_LAYOUT_UNDEFINED,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_QUEUE_FAMILY_IGNORED,
+            VK_QUEUE_FAMILY_IGNORED,
+            m_presentImage,
+            subresourceRange
+        };
+
+        VkImageMemoryBarrier presentImageToShaderRead{
+            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            nullptr,
+            VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_SHADER_READ_BIT,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_QUEUE_FAMILY_IGNORED,
+            VK_QUEUE_FAMILY_IGNORED,
+            m_presentImage,
+            subresourceRange
+        };
+
         VkRenderPassBeginInfo renderPassBeginInfo{
             VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
             nullptr,
@@ -1224,7 +1270,17 @@ private:
             &clearValue
         };
 
-        VkDeviceSize offsets[] = { 0 };
+        VkImageSubresourceLayers subresourceLayers{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+        VkOffset3D offset3D{ 0, 0, 0 };
+        VkExtent3D extent{};
+
+        VkImageCopy imageCopyInfo{
+            subresourceLayers,
+            offset3D,
+            subresourceLayers,
+            offset3D,
+            VkExtent3D{ m_width, m_height, 1 }
+        };
 
         // Commands TODO
         // 1. compute image
@@ -1233,7 +1289,21 @@ private:
         VK_CHECK(vkBeginCommandBuffer(m_commandBuffers[0], &beginInfo));
         vkCmdBindDescriptorSets(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineLayout, 0, m_graphicsDescriptorSets.size(), m_graphicsDescriptorSets.data(), 0, nullptr);
         vkCmdBindPipeline(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
-        vkCmdPipelineBarrier(m_commandBuffers[0], VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapchainImageBarrier);
+
+        vkCmdBindDescriptorSets(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipelineLayout, 0, 1, &m_computeDescriptorSet, 0, nullptr);
+        vkCmdBindPipeline(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipelines[0]);
+
+        // Make compute image solid red (testing)
+        vkCmdPipelineBarrier(m_commandBuffers[0], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &computeImageBarrier);
+        vkCmdClearColorImage(m_commandBuffers[0], m_computeImage, VK_IMAGE_LAYOUT_GENERAL, &redClearColorValue, 1, &subresourceRange);
+
+        // transfer image from compute image to present image
+        vkCmdPipelineBarrier(m_commandBuffers[0], VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &transferComputeImageToPresentImageComputeBarrier);
+        vkCmdPipelineBarrier(m_commandBuffers[0], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &transferComputeImageToPresentImagePresentBarrier);
+        vkCmdCopyImage(m_commandBuffers[0], m_computeImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_presentImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &imageCopyInfo);
+
+        vkCmdPipelineBarrier(m_commandBuffers[0], VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &presentImageToShaderRead);
+
         vkCmdBeginRenderPass(m_commandBuffers[0], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindVertexBuffers(m_commandBuffers[0], 0, 1, &m_vertexBuffer, offsets);
         vkCmdDraw(m_commandBuffers[0], 4, 1, 0, 0);
@@ -1577,6 +1647,7 @@ private:
         for (const auto &presentMode : availablePresentModes)
         {
             if (presentMode == VK_PRESENT_MODE_MAILBOX_KHR)
+                // if (presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR)
                 return presentMode;
         }
 

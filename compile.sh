@@ -1,6 +1,6 @@
-glslc compute.comp -o compute.spv
-glslc vertex.vert -o vertex.spv
-glslc fragment.frag -o fragment.spv
+glslc shaders/compute.comp -o shaders/compute.spv
+glslc shaders/vertex.vert -o shaders/vertex.spv
+glslc shaders/fragment.frag -o shaders/fragment.spv
 
 # Check if the compilation was successful
 if [ $? -eq 0 ]; then
