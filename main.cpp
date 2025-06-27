@@ -1287,15 +1287,16 @@ private:
         // 2. transfer image from Compute VkImage to Present VkImage
         // 3. Sample the Present VkImage as a texture onto the full screen quad
         VK_CHECK(vkBeginCommandBuffer(m_commandBuffers[0], &beginInfo));
-        vkCmdBindDescriptorSets(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineLayout, 0, m_graphicsDescriptorSets.size(), m_graphicsDescriptorSets.data(), 0, nullptr);
         vkCmdBindPipeline(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+        vkCmdBindDescriptorSets(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipelineLayout, 0, m_graphicsDescriptorSets.size(), m_graphicsDescriptorSets.data(), 0, nullptr);
 
-        vkCmdBindDescriptorSets(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipelineLayout, 0, 1, &m_computeDescriptorSet, 0, nullptr);
         vkCmdBindPipeline(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipelines[0]);
+        vkCmdBindDescriptorSets(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipelineLayout, 0, 1, &m_computeDescriptorSet, 0, nullptr);
 
         // Make compute image solid red (testing)
         vkCmdPipelineBarrier(m_commandBuffers[0], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &computeImageBarrier);
-        vkCmdClearColorImage(m_commandBuffers[0], m_computeImage, VK_IMAGE_LAYOUT_GENERAL, &redClearColorValue, 1, &subresourceRange);
+        vkCmdDispatch(m_commandBuffers[0], m_width / 16, m_height / 16, 1);
+        // vkCmdClearColorImage(m_commandBuffers[0], m_computeImage, VK_IMAGE_LAYOUT_GENERAL, &redClearColorValue, 1, &subresourceRange);
 
         // transfer image from compute image to present image
         vkCmdPipelineBarrier(m_commandBuffers[0], VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &transferComputeImageToPresentImageComputeBarrier);
