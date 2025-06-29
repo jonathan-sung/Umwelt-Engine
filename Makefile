@@ -10,7 +10,7 @@ $(NAME) : main.cpp
 .PHONY: run clean
 
 run: $(NAME)
-	./compile.sh
+	./compile_shaders.sh
 	mangohud --dlsym ./$(NAME)
 
 clean:

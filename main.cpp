@@ -131,6 +131,7 @@ private:
     // General member variables
     uint32_t m_width;
     uint32_t m_height;
+    bool enableConsoleOutput = false;
 
     // GLFW member variables
     GLFWwindow *m_window;
@@ -1763,7 +1764,6 @@ private:
 
     std::optional<uint32_t> getMemoryTypeIndex(const VkMemoryRequirements &memoryRequirements, const VkMemoryPropertyFlags &requiredFlags)
     {
-        bool enableConsoleOutput = false;
         std::optional<uint32_t> selectedMemoryType;
 
         if (enableConsoleOutput)
@@ -1822,6 +1822,17 @@ private:
 
     void recreateSwapChain()
     {
+        // check if window is minimised
+        int width = 0, height = 0;
+        glfwGetFramebufferSize(m_window, &width, &height);
+        while (width == 0 || height == 0)
+        {
+            if (enableConsoleOutput)
+                std::clog << "minimised!" << std::endl;
+            glfwGetFramebufferSize(m_window, &width, &height);
+            glfwWaitEvents();
+        }
+
         vkDeviceWaitIdle(m_device);
 
         cleanupSwapChain();
@@ -1869,8 +1880,12 @@ private:
 
 int main()
 {
-    std::unique_ptr<Game> game = std::make_unique<Game>(2560, 16.0f / 9.0f);
-    // std::unique_ptr<Game> game = std::make_unique<Game>(800, 4.0f / 3.0f);
+    // std::unique_ptr<Game> game = std::make_unique<Game>(2560, 16.0f / 9.0f);
+    // std::unique_ptr<Game> game = std::make_unique<Game>(1920, 16.0f / 9.0f);
+    std::unique_ptr<Game> game = std::make_unique<Game>(2048, 4.0f / 3.0f);
+    // std::unique_ptr<Game> game = std::make_unique<Game>(1024, 4.0f / 3.0f);
+    // std::unique_ptr<Game> game = std::make_unique<Game>(640, 4.0f / 3.0f);
+    // std::unique_ptr<Game> game = std::make_unique<Game>(320, 4.0f / 3.0f);
     game->run();
     return EXIT_SUCCESS;
 }
