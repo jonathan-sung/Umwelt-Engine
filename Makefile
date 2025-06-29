@@ -1,15 +1,15 @@
 CFLAGS = -std=c++2b -O2
 LDFLAGS = -lglfw -lvulkan -ldl -lpthread -lX11 -lXxf86vm -lXrandr -lXi
-NAME = VulkanFun
+NAME = Umwelt 
 
-all: VulkanFun
+all: $(NAME)
 
-VulkanFun : main.cpp 
+$(NAME) : main.cpp
 	g++ $(CFLAGS) *.cpp $(LDFLAGS) -o $(NAME)
 
 .PHONY: run clean
 
-run: VulkanFun 
+run: $(NAME)
 	./compile.sh
 	mangohud --dlsym ./$(NAME)
 
