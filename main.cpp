@@ -120,8 +120,8 @@ private:
     VkDescriptorSet m_computeDescriptorSet = VK_NULL_HANDLE;
     VkDescriptorSetLayout m_computeDescriptorSetLayout = VK_NULL_HANDLE;
 
-    VkPushConstantRange computePushConstantRange{ VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t) * 2 };
-    VkPushConstantRange graphicsPushConstantRange{ VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(uint32_t) * 2 };
+    VkPushConstantRange computePushConstantRange{ VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantData) };
+    VkPushConstantRange graphicsPushConstantRange{ VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantData) };
 
     // // Resources
     VkDeviceMemory m_computeImageMemory = VK_NULL_HANDLE;
@@ -132,6 +132,7 @@ private:
     uint32_t m_width;
     uint32_t m_height;
     bool enableConsoleOutput = false;
+    std::array<uint32_t, 3> workGroupSize;
 
     // GLFW member variables
     GLFWwindow *m_window;
@@ -184,6 +185,12 @@ private:
         }
     };
 
+    struct PushConstantData
+    {
+        VkExtent2D extent;
+        float time;
+    };
+
     const std::vector<const char *> validationLayers{
         "VK_LAYER_KHRONOS_validation"
     };
@@ -191,6 +198,11 @@ private:
     const std::vector<const char *> deviceExtensions{
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
+
+    static void cursorPositionCallback(GLFWwindow *window, double xPos, double yPos)
+    {
+        // std::clog << "Cursor Position: (" << xPos << ", " << yPos << ")\n";
+    }
 
     void initWindow()
     {
@@ -206,6 +218,15 @@ private:
 
         if (glfwVulkanSupported() == GLFW_FALSE)
             throw std::runtime_error("GLFW Vulkan not supported!");
+
+        if (glfwRawMouseMotionSupported() == GLFW_FALSE)
+            throw std::runtime_error("GLFW raw mouse motion not supported!");
+        else
+        {
+            glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            glfwSetInputMode(m_window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+        }
+        glfwSetCursorPosCallback(m_window, cursorPositionCallback);
     }
 
     void initVulkan()
@@ -222,6 +243,7 @@ private:
         createFramebuffers();
 
         // Compute
+        setWorkGroupSize();
         createComputeResources();
         createComputeDescriptorSets();
         createComputePipeline();
@@ -913,6 +935,19 @@ private:
     {
         VkShaderModule computeModule = createShaderModule("shaders/compute.spv");
 
+        std::array<VkSpecializationMapEntry, 2> mapEntries;
+        mapEntries[0] = { 0, 0, sizeof(uint32_t) };
+        mapEntries[1] = { 1, sizeof(uint32_t) * 1, sizeof(uint32_t) };
+
+        void *specializationData = reinterpret_cast<void *>(workGroupSize.data());
+
+        VkSpecializationInfo specializationInfo{
+            2,
+            mapEntries.data(),
+            sizeof(uint32_t) * mapEntries.size(),
+            &specializationData
+        };
+
         VkPipelineShaderStageCreateInfo stageInfo{
             VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
             nullptr,
@@ -920,7 +955,7 @@ private:
             VK_SHADER_STAGE_COMPUTE_BIT,
             computeModule,
             "main",
-            nullptr
+            &specializationInfo
         };
 
         VkPipelineLayoutCreateInfo computePipelineLayoutInfo{
@@ -947,12 +982,12 @@ private:
 
         m_computePipelines.resize(1);
         VK_CHECK(vkCreateComputePipelines(m_device, nullptr, 1, &computePipelineInfo, nullptr, m_computePipelines.data()), "create compute pipeline");
+
         vkDestroyShaderModule(m_device, computeModule, nullptr);
     }
 
     bool createBlockOfMemory(uint32_t memoryType, VkDeviceSize size, VkDeviceMemory &memoryBlock)
     {
-        bool success = false;
 
         VkMemoryAllocateInfo allocateInfo{
             VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
@@ -961,12 +996,9 @@ private:
             memoryType
         };
 
-        if (vkAllocateMemory(m_device, &allocateInfo, nullptr, &memoryBlock) != VK_SUCCESS)
-            throw std::runtime_error("failed to allocate memory!");
+        VK_CHECK(vkAllocateMemory(m_device, &allocateInfo, nullptr, &memoryBlock), "allocate block of memory");
 
-        success = true;
-
-        return success;
+        return true;
     }
 
     void createImageViews()
@@ -1126,6 +1158,27 @@ private:
 
         if (!isDeviceSuitable(m_physicalDevice))
             throw std::runtime_error("physical device is not suitable!");
+    }
+
+    void setWorkGroupSize()
+    {
+        // Set work group size
+        VkPhysicalDeviceProperties properties;
+        vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
+        uint32_t size = 1;
+        do
+        {
+            size = size << 1;
+
+        } while (size * size <= properties.limits.maxComputeWorkGroupInvocations);
+
+        size = size >> 1;
+        // size = 32;
+        workGroupSize[0] = size;
+        workGroupSize[1] = size;
+        workGroupSize[2] = 1;
+
+        // std::clog << size * size << std::endl;
     }
 
     void createInstance()
@@ -1317,8 +1370,11 @@ private:
         VK_CHECK(vkBeginCommandBuffer(m_commandBuffers[0], &beginInfo), "begin command buffer");
 
         // update push constants
-        vkCmdPushConstants(m_commandBuffers[0], m_computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(uint32_t) * 2, reinterpret_cast<void *>(&m_swapChainExtent));
-        vkCmdPushConstants(m_commandBuffers[0], m_graphicsPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(uint32_t) * 2, reinterpret_cast<void *>(&m_swapChainExtent));
+
+        PushConstantData pushConstantData{ m_swapChainExtent, static_cast<float>(glfwGetTime()) };
+
+        vkCmdPushConstants(m_commandBuffers[0], m_computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantData), reinterpret_cast<void *>(&pushConstantData));
+        vkCmdPushConstants(m_commandBuffers[0], m_graphicsPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantData), reinterpret_cast<void *>(&pushConstantData));
 
         // set up compute pipeline
         vkCmdBindPipeline(m_commandBuffers[0], VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipelines[0]);
@@ -1326,7 +1382,7 @@ private:
 
         // execute compute work
         vkCmdPipelineBarrier(m_commandBuffers[0], VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &computeImageBarrier);
-        vkCmdDispatch(m_commandBuffers[0], m_width / 16, m_height / 16, 1);
+        vkCmdDispatch(m_commandBuffers[0], m_width / workGroupSize[0], m_height / workGroupSize[1], 1);
 
         // transfer compute image to present image
         vkCmdPipelineBarrier(m_commandBuffers[0], VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &transferComputeImageToPresentImageComputeBarrier);
@@ -1880,9 +1936,9 @@ private:
 
 int main()
 {
-    // std::unique_ptr<Game> game = std::make_unique<Game>(2560, 16.0f / 9.0f);
+    std::unique_ptr<Game> game = std::make_unique<Game>(2560, 16.0f / 9.0f);
     // std::unique_ptr<Game> game = std::make_unique<Game>(1920, 16.0f / 9.0f);
-    std::unique_ptr<Game> game = std::make_unique<Game>(2048, 4.0f / 3.0f);
+    // std::unique_ptr<Game> game = std::make_unique<Game>(2048, 4.0f / 3.0f);
     // std::unique_ptr<Game> game = std::make_unique<Game>(1024, 4.0f / 3.0f);
     // std::unique_ptr<Game> game = std::make_unique<Game>(640, 4.0f / 3.0f);
     // std::unique_ptr<Game> game = std::make_unique<Game>(320, 4.0f / 3.0f);
