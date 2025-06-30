@@ -8,9 +8,13 @@ slangc shaders/fragment.slang -profile spirv_1_6 -target spirv-assembly -o shade
 
 # Change the OpSource line in the disassembled shader
 # This is necessary because the OpSource line is not compatible with the Vulkan SDK version
-sed -i '15s/.*/OpSource Unknown 0/' shaders/disassembled_compute.spv
-sed -i '11s/.*/OpSource Unknown 0/' shaders/disassembled_vertex.spv
-sed -i '12s/.*/OpSource Unknown 0/' shaders/disassembled_fragment.spv
+# sed -i '14s/.*/OpSource Unknown 0/' shaders/disassembled_compute.spv
+# sed -i '11s/.*/OpSource Unknown 0/' shaders/disassembled_vertex.spv
+# sed -i '12s/.*/OpSource Unknown 0/' shaders/disassembled_fragment.spv
+sed -i 's/OpSource Slang 1/OpSource Unknown 0/' shaders/disassembled_compute.spv
+sed -i 's/OpSource Slang 1/OpSource Unknown 0/' shaders/disassembled_vertex.spv
+sed -i 's/OpSource Slang 1/OpSource Unknown 0/' shaders/disassembled_fragment.spv
+
 
 # Compile the disassembled shader back to SPIR-V binary
 spirv-as shaders/disassembled_compute.spv -o shaders/compute.spv

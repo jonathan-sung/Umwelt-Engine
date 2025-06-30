@@ -1172,8 +1172,8 @@ private:
 
         } while (size * size <= properties.limits.maxComputeWorkGroupInvocations);
 
-        size = size >> 1;
-        // size = 32;
+        size = size >> 1; // choose the largest size supported by the device
+        size = 16; // hard-coding it on 16 just to be safe; comment this out later
         workGroupSize[0] = size;
         workGroupSize[1] = size;
         workGroupSize[2] = 1;

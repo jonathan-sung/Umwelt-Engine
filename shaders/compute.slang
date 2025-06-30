@@ -1,5 +1,13 @@
 #version 450
 
+[SpecializationConstant]
+[vk::constant_id(0)]
+const uint localSizeX;
+
+[SpecializationConstant]
+[vk::constant_id(1)]
+const uint localSizeY;
+
 [vk::binding(0, 0)]
 RWTexture2D<float4> outputImage;
 
@@ -65,7 +73,7 @@ float3 getRayColor(Ray r)
 }
 
 [shader("compute")]
-[numthreads(32, 32, 1)]
+[numthreads(16, 16, 1)]
 void main(uint3 thread: SV_DispatchThreadID)
 {
     float focalLength = 1.0;
