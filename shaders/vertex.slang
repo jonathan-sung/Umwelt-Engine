@@ -1,6 +1,12 @@
+
+// [shader("vertex")]
+// float4 vertexMain(in float2 inPosition, in out float3 color: COLOR0) : SV_Position
+// {
+//     return float4(inPosition, 0.0, 1.0);
+// }
+
 [shader("vertex")]
-float4 main(float2 inPosition: POSITION0, float3 inColor: COLOR0, out float3 fragColor: COLOR0) : SV_Position
+void vertexMain(in float2 inPosition, in out float3 color: COLOR0, out float4 outPosition: SV_Position)
 {
-    fragColor = inColor;
-    return float4(inPosition, 0.0, 1.0);
+    outPosition = float4(inPosition, 0.0, 1.0);
 }

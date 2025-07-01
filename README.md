@@ -30,3 +30,4 @@ make run
 - [Vulkan Tutorial](https://vulkan-tutorial.com/)
 - [Vulkan Samples](https://github.com/SaschaWillems/Vulkan)
 - [GLFW Documentation](https://www.glfw.org/docs/latest/)
+- [Slang Documentation](https://shader-slang.github.io/)

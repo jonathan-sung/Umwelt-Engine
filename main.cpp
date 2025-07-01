@@ -223,10 +223,10 @@ private:
             throw std::runtime_error("GLFW raw mouse motion not supported!");
         else
         {
-            glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            glfwSetInputMode(m_window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+            // glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            // glfwSetInputMode(m_window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+            // glfwSetCursorPosCallback(m_window, cursorPositionCallback);
         }
-        glfwSetCursorPosCallback(m_window, cursorPositionCallback);
     }
 
     void initVulkan()
@@ -420,7 +420,7 @@ private:
     void createUniformBuffer()
     {
         void *data;
-        float stuff[] = { 69.0f };
+        float stuff[] = { 0.1f, 0.7f, 0.6f };
 
         QueueFamilyIndices queueFamilies = findQueueFamilies(m_physicalDevice);
 
@@ -666,7 +666,7 @@ private:
             0,
             VK_SHADER_STAGE_VERTEX_BIT,
             vertexModule,
-            "main",
+            "vertexMain",
             nullptr
         };
 
@@ -676,7 +676,7 @@ private:
             0,
             VK_SHADER_STAGE_FRAGMENT_BIT,
             fragmentModule,
-            "main",
+            "fragmentMain",
             nullptr
         };
 
@@ -937,14 +937,16 @@ private:
 
         std::array<VkSpecializationMapEntry, 2> mapEntries;
         mapEntries[0] = { 0, 0, sizeof(uint32_t) };
-        mapEntries[1] = { 1, sizeof(uint32_t) * 1, sizeof(uint32_t) };
+        mapEntries[1] = { 1, sizeof(uint32_t), sizeof(uint32_t) };
 
-        void *specializationData = reinterpret_cast<void *>(workGroupSize.data());
+        std::vector<uint32_t> data = { 1, 1 };
+
+        void *specializationData = reinterpret_cast<void *>(data.data());
 
         VkSpecializationInfo specializationInfo{
             2,
             mapEntries.data(),
-            sizeof(uint32_t) * mapEntries.size(),
+            sizeof(data),
             &specializationData
         };
 
@@ -954,7 +956,7 @@ private:
             0,
             VK_SHADER_STAGE_COMPUTE_BIT,
             computeModule,
-            "main",
+            "computeMain",
             &specializationInfo
         };
 
@@ -1173,7 +1175,7 @@ private:
         } while (size * size <= properties.limits.maxComputeWorkGroupInvocations);
 
         size = size >> 1; // choose the largest size supported by the device
-        size = 16; // hard-coding it on 16 just to be safe; comment this out later
+        size = 16;        // hard-coding it on 16 just to be safe; comment this out later
         workGroupSize[0] = size;
         workGroupSize[1] = size;
         workGroupSize[2] = 1;

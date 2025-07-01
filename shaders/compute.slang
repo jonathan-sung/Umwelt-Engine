@@ -2,16 +2,15 @@
 
 [SpecializationConstant]
 [vk::constant_id(0)]
-const uint localSizeX;
+const uint special0;
 
 [SpecializationConstant]
 [vk::constant_id(1)]
-const uint localSizeY;
+const uint special1;
 
 [vk::binding(0, 0)]
 RWTexture2D<float4> outputImage;
 
-// Push constants in Slang are defined with a uniform block
 struct PushConstants
 {
     uint width;
@@ -74,7 +73,7 @@ float3 getRayColor(Ray r)
 
 [shader("compute")]
 [numthreads(16, 16, 1)]
-void main(uint3 thread: SV_DispatchThreadID)
+void computeMain(uint3 thread: SV_DispatchThreadID)
 {
     float focalLength = 1.0;
     float viewportHeight = 2.0;
@@ -98,5 +97,7 @@ void main(uint3 thread: SV_DispatchThreadID)
     float3 color = getRayColor(r);
 
     // Write to RWTexture2D in Slang
-    outputImage[threadID.xy] = float4(color, 1.0);
+    // outputImage[threadID.xy] = float4(color, 1.0);
+
+    outputImage[threadID.xy] = float4(special0, 0.0, special1, 1.0);
 }
