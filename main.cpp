@@ -25,6 +25,8 @@
 #include <vector>
 #include <vulkan/vk_enum_string_helper.h>
 
+#define MAX_MEMORY (1024 * 1024) // 1 MB for Nuklear GUI memory
+
 #ifdef NDEBUG
 bool validationLayersEnabled = false;
 #else
@@ -254,6 +256,7 @@ private:
         createGraphicsPipeline();
 
         createCommandPool();
+
     }
 
     void cleanupDescriptorSet(VkDevice device, VkDescriptorPool &descriptorPool, VkDescriptorSetLayout &descriptorSetLayout, uint32_t descriptorSetCount, VkDescriptorSet *descriptorSets)
