@@ -935,19 +935,20 @@ private:
     {
         VkShaderModule computeModule = createShaderModule("shaders/compute.spv");
 
-        std::array<VkSpecializationMapEntry, 2> mapEntries;
-        mapEntries[0] = { 0, 0, sizeof(uint32_t) };
-        mapEntries[1] = { 1, sizeof(uint32_t), sizeof(uint32_t) };
+        std::array<VkSpecializationMapEntry, 3> mapEntries;
+        mapEntries[0] = { 0, 0, sizeof(float) };
+        mapEntries[1] = { 1, sizeof(float), sizeof(float) };
+        mapEntries[2] = { 2, sizeof(float) * 2, sizeof(float) };
 
-        std::vector<uint32_t> data = { 1, 1 };
+        std::vector<float> data = { 0.1f, 0.8f, 0.6f };
 
         void *specializationData = reinterpret_cast<void *>(data.data());
 
         VkSpecializationInfo specializationInfo{
-            2,
+            mapEntries.size(),
             mapEntries.data(),
-            sizeof(data),
-            &specializationData
+            data.size() * sizeof(float),
+            specializationData
         };
 
         VkPipelineShaderStageCreateInfo stageInfo{

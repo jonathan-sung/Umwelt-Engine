@@ -1,12 +1,14 @@
-#version 450
-
 [SpecializationConstant]
 [vk::constant_id(0)]
-const uint special0;
+const float special0 = 0.0;
 
 [SpecializationConstant]
 [vk::constant_id(1)]
-const uint special1;
+const float special1 = 0.0;
+
+[SpecializationConstant]
+[vk::constant_id(2)]
+const float special2 = 0.0;
 
 [vk::binding(0, 0)]
 RWTexture2D<float4> outputImage;
@@ -15,10 +17,11 @@ struct PushConstants
 {
     uint width;
     uint height;
+    float time;
 };
 
 [[vk::push_constant]]
-ConstantBuffer<PushConstants> pushConstants;
+ConstantBuffer<PushConstants> pushConstants; // 128 bytes
 
 struct Ray
 {
@@ -37,6 +40,10 @@ float3 rayAt(Ray ray, float t)
 {
     return ray.origin + (t * ray.direction);
 }
+
+struct Hittable
+{
+};
 
 float hitSphere(float3 center, float radius, Ray r)
 {
@@ -97,7 +104,7 @@ void computeMain(uint3 thread: SV_DispatchThreadID)
     float3 color = getRayColor(r);
 
     // Write to RWTexture2D in Slang
-    // outputImage[threadID.xy] = float4(color, 1.0);
+    outputImage[threadID.xy] = float4(color, 1.0);
 
-    outputImage[threadID.xy] = float4(special0, 0.0, special1, 1.0);
+    // outputImage[threadID.xy] = float4(special0, special1, special2, 1.0);
 }

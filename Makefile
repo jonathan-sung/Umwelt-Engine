@@ -1,4 +1,4 @@
-CFLAGS = -std=c++2b -O2
+CFLAGS = -std=c++23 -O2
 LDFLAGS = -lglfw -lvulkan -ldl -lpthread -lX11 -lXxf86vm -lXrandr -lXi
 NAME = Umwelt 
 
