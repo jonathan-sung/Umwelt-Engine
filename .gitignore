@@ -4,3 +4,6 @@ VulkanFun
 Umwelt
 shaders/temp/
 *.o
+compile_commands.json
+.cache/
+imgui.ini

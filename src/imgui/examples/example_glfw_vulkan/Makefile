@@ -14,18 +14,17 @@
 #CXX = g++
 #CXX = clang++
 
-EXE = Umwelt
-SRC_DIR = src
-IMGUI_DIR = $(SRC_DIR)/imgui
-SOURCES = $(SRC_DIR)/main.cpp
+EXE = example_glfw_vulkan
+IMGUI_DIR = ../..
+SOURCES = main.cpp
 SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
 SOURCES += $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp $(IMGUI_DIR)/backends/imgui_impl_vulkan.cpp
 OBJS = $(addsuffix .o, $(basename $(notdir $(SOURCES))))
 UNAME_S := $(shell uname -s)
 LINUX_GL_LIBS = -lGL
 
-CXXFLAGS = -std=c++23 -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends
-CXXFLAGS += -O2 -g -Wall -Wformat
+CXXFLAGS = -std=c++11 -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backends
+CXXFLAGS += -g -Wall -Wformat
 LIBS =
 
 ##---------------------------------------------------------------------
@@ -65,7 +64,7 @@ endif
 ## BUILD RULES
 ##---------------------------------------------------------------------
 
-%.o:$(SRC_DIR)/%.cpp
+%.o:%.cpp
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 %.o:$(IMGUI_DIR)/%.cpp
@@ -79,11 +78,6 @@ all: $(EXE)
 
 $(EXE): $(OBJS)
 	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS)
-
-run: $(EXE)
-	@echo Running $(EXE)...
-	./compile_shaders.sh
-	mangohud --dlsym ./$(EXE)
 
 clean:
 	rm -f $(EXE) $(OBJS)

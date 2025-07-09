@@ -11,6 +11,9 @@
 #include <string>
 #include <vulkan/vulkan_core.h>
 #define GLFW_INCLUDE_VULKAN
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_vulkan.h"
 #include <GLFW/glfw3.h>
 #include <cstddef>
 #include <cstdint>
@@ -257,6 +260,11 @@ private:
 
         createCommandPool();
 
+        setupImGui();
+    }
+
+    void setupImGui()
+    {
     }
 
     void cleanupDescriptorSet(VkDevice device, VkDescriptorPool &descriptorPool, VkDescriptorSetLayout &descriptorSetLayout, uint32_t descriptorSetCount, VkDescriptorSet *descriptorSets)
@@ -365,8 +373,8 @@ private:
         VkDescriptorPoolCreateInfo graphicsDescriptorPoolInfo{
             VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
             nullptr,
-            0,
-            1,
+            VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+            1000, // ImGui likes to just allocate descriptor sets willy nilly so 1000 should be enough
             2,
             poolSizes
         };
@@ -597,7 +605,7 @@ private:
     void createFramebuffers()
     {
         m_framebuffers.resize(m_swapChainImageViews.size());
-        for (auto i = 0; i < m_swapChainImageViews.size(); i++)
+        for (size_t i = 0; i < m_swapChainImageViews.size(); i++)
         {
             VkImageView attachments[] = { m_swapChainImageViews[i] };
 
@@ -658,9 +666,7 @@ private:
 
     void createGraphicsPipeline()
     {
-        VkShaderModuleCreateInfo vertexShaderInfo{};
         VkShaderModule vertexModule = createShaderModule("shaders/vertex.spv");
-        VkShaderModuleCreateInfo fragmentShaderInfo{};
         VkShaderModule fragmentModule = createShaderModule("shaders/fragment.spv");
 
         VkPipelineShaderStageCreateInfo vertexStageInfo{
@@ -705,8 +711,8 @@ private:
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN,
             VK_FALSE
         };
-        VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(m_swapChainExtent.width), static_cast<float>(m_swapChainExtent.height), 0.0f, 1.0f };
-        VkRect2D scissor{ { 0, 0 }, m_swapChainExtent };
+        // VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(m_swapChainExtent.width), static_cast<float>(m_swapChainExtent.height), 0.0f, 1.0f };
+        // VkRect2D scissor{ { 0, 0 }, m_swapChainExtent };
 
         VkPipelineViewportStateCreateInfo viewportStateInfo{
             VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
@@ -1238,8 +1244,56 @@ private:
     }
     void mainLoop()
     {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO &io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+
+        ImGui_ImplGlfw_InitForVulkan(m_window, true);
+        ImGui_ImplVulkan_InitInfo initInfo{};
+        initInfo.ApiVersion = VK_API_VERSION_1_3;
+        initInfo.Instance = m_instance;
+        initInfo.PhysicalDevice = m_physicalDevice;
+        initInfo.Device = m_device;
+        initInfo.QueueFamily = findQueueFamilies(m_physicalDevice).graphicsFamily.value();
+        initInfo.Queue = m_graphicsQueue;
+        initInfo.DescriptorPool = m_graphicsDescriptorPool;
+        initInfo.RenderPass = m_renderPass;
+        initInfo.MinImageCount = 2;
+        initInfo.ImageCount = m_swapChainImageViews.size();
+        initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        initInfo.Subpass = 0;
+        ImGui_ImplVulkan_Init(&initInfo);
+
         while (!glfwWindowShouldClose(m_window))
         {
+
+            // Start the Dear ImGui frame
+            ImGui_ImplVulkan_NewFrame();
+            ImGui_ImplGlfw_NewFrame();
+            ImGui::NewFrame();
+            ImGui::ShowDemoWindow(); // Show demo window! :)
+
+            {
+                static float f = 0.0f;
+                static int counter = 0;
+
+                ImGui::Begin("Hello, world!"); // Create a window called "Hello, world!" and append into it.
+
+                ImGui::Text("This is some useful text."); // Display some text (you can use a format strings too)
+
+                ImGui::SliderFloat("float", &f, 0.0f, 1.0f); // Edit 1 float using a slider from 0.0f to 1.0f
+
+                if (ImGui::Button("Button")) // Buttons return true when clicked (most widgets return true when edited/activated)
+                    counter++;
+                ImGui::SameLine();
+                ImGui::Text("counter = %d", counter);
+
+                ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+                ImGui::End();
+            }
+
             glfwPollEvents();
             // TEST_updateUniformBuffer();
 
@@ -1292,7 +1346,6 @@ private:
         VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr, 0, nullptr };
         VkImageSubresourceRange subresourceRange{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
         VkClearValue clearValue = { 1.0f, 1.0f, 1.0f, 1.0f };
-        VkClearColorValue redClearColorValue = { 1.0f, 0.0f, 0.0f, 1.0f };
         VkDeviceSize offsets[] = { 0 };
 
         VkImageMemoryBarrier computeImageBarrier{
@@ -1359,7 +1412,6 @@ private:
 
         VkImageSubresourceLayers subresourceLayers{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
         VkOffset3D offset3D{ 0, 0, 0 };
-        VkExtent3D extent{};
 
         VkImageCopy imageCopyInfo{
             subresourceLayers,
@@ -1410,6 +1462,8 @@ private:
         vkCmdBeginRenderPass(m_commandBuffers[0], &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdBindVertexBuffers(m_commandBuffers[0], 0, 1, &m_vertexBuffer, offsets);
         vkCmdDraw(m_commandBuffers[0], 4, 1, 0, 0);
+        ImGui::Render();
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), m_commandBuffers[0]);
         vkCmdEndRenderPass(m_commandBuffers[0]);
 
         VK_CHECK(vkEndCommandBuffer(m_commandBuffers[0]), "end command buffer");
@@ -1468,9 +1522,16 @@ private:
         vkDestroyImageView(m_device, imageView, nullptr);
         vkDestroyImage(device, image, nullptr);
     }
+    void cleanUpImGui()
+    {
+        ImGui_ImplVulkan_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+        ImGui::DestroyContext();
+    }
 
     void cleanup()
     {
+        cleanUpImGui();
         vkDeviceWaitIdle(m_device);
 
         vkDestroySemaphore(m_device, imageAvailableSemaphore, nullptr);
