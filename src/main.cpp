@@ -194,6 +194,7 @@ private:
     {
         VkExtent2D extent;
         float time;
+        float alpha = 1.0f;
     };
 
     const std::vector<const char *> validationLayers{
@@ -203,6 +204,8 @@ private:
     const std::vector<const char *> deviceExtensions{
         VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
+
+    PushConstantData pushConstantData{};
 
     static void cursorPositionCallback(GLFWwindow *window, double xPos, double yPos)
     {
@@ -263,8 +266,63 @@ private:
         setupImGui();
     }
 
+    void recreateImGui()
+    {
+        vkDeviceWaitIdle(m_device);
+        cleanUpImGui();
+        setupImGui();
+    }
+
+    void renderImGui()
+    {
+        // Start the Dear ImGui frame
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        // ImGui::ShowDemoWindow(); // Show demo window! :)
+        {
+            static int counter = 0;
+
+            ImGui::Begin("Hello, world!"); // Create a window called "Hello, world!" and append into it.
+
+            ImGui::Text("This is some useful text."); // Display some text (you can use a format strings too)
+
+            ImGui::SliderFloat("float", &pushConstantData.alpha, 0.0f, 1.0f); // Edit 1 float using a slider from 0.0f to 1.0f
+
+            if (ImGui::Button("Button")) // Buttons return true when clicked (most widgets return true when edited/activated)
+                counter++;
+            ImGui::SameLine();
+            ImGui::Text("counter = %d", counter);
+
+            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+            ImGui::End();
+        }
+    }
+
     void setupImGui()
     {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGuiIO &io = ImGui::GetIO();
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+        ImGui::GetStyle().FontScaleMain = 2.0f;
+
+        ImGui_ImplGlfw_InitForVulkan(m_window, true);
+        ImGui_ImplVulkan_InitInfo initInfo{};
+        initInfo.ApiVersion = VK_API_VERSION_1_3;
+        initInfo.Instance = m_instance;
+        initInfo.PhysicalDevice = m_physicalDevice;
+        initInfo.Device = m_device;
+        initInfo.QueueFamily = findQueueFamilies(m_physicalDevice).graphicsFamily.value();
+        initInfo.Queue = m_graphicsQueue;
+        initInfo.DescriptorPool = m_graphicsDescriptorPool;
+        initInfo.RenderPass = m_renderPass;
+        initInfo.MinImageCount = 2;
+        initInfo.ImageCount = m_swapChainImageViews.size();
+        initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        initInfo.Subpass = 0;
+        ImGui_ImplVulkan_Init(&initInfo);
     }
 
     void cleanupDescriptorSet(VkDevice device, VkDescriptorPool &descriptorPool, VkDescriptorSetLayout &descriptorSetLayout, uint32_t descriptorSetCount, VkDescriptorSet *descriptorSets)
@@ -1244,58 +1302,11 @@ private:
     }
     void mainLoop()
     {
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImGuiIO &io = ImGui::GetIO();
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-        io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
-
-        ImGui_ImplGlfw_InitForVulkan(m_window, true);
-        ImGui_ImplVulkan_InitInfo initInfo{};
-        initInfo.ApiVersion = VK_API_VERSION_1_3;
-        initInfo.Instance = m_instance;
-        initInfo.PhysicalDevice = m_physicalDevice;
-        initInfo.Device = m_device;
-        initInfo.QueueFamily = findQueueFamilies(m_physicalDevice).graphicsFamily.value();
-        initInfo.Queue = m_graphicsQueue;
-        initInfo.DescriptorPool = m_graphicsDescriptorPool;
-        initInfo.RenderPass = m_renderPass;
-        initInfo.MinImageCount = 2;
-        initInfo.ImageCount = m_swapChainImageViews.size();
-        initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-        initInfo.Subpass = 0;
-        ImGui_ImplVulkan_Init(&initInfo);
-
         while (!glfwWindowShouldClose(m_window))
         {
-
-            // Start the Dear ImGui frame
-            ImGui_ImplVulkan_NewFrame();
-            ImGui_ImplGlfw_NewFrame();
-            ImGui::NewFrame();
-            ImGui::ShowDemoWindow(); // Show demo window! :)
-
-            {
-                static float f = 0.0f;
-                static int counter = 0;
-
-                ImGui::Begin("Hello, world!"); // Create a window called "Hello, world!" and append into it.
-
-                ImGui::Text("This is some useful text."); // Display some text (you can use a format strings too)
-
-                ImGui::SliderFloat("float", &f, 0.0f, 1.0f); // Edit 1 float using a slider from 0.0f to 1.0f
-
-                if (ImGui::Button("Button")) // Buttons return true when clicked (most widgets return true when edited/activated)
-                    counter++;
-                ImGui::SameLine();
-                ImGui::Text("counter = %d", counter);
-
-                ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-                ImGui::End();
-            }
+            renderImGui();
 
             glfwPollEvents();
-            // TEST_updateUniformBuffer();
 
             acquireImage();
             drawFrame();
@@ -1429,7 +1440,9 @@ private:
 
         // update push constants
 
-        PushConstantData pushConstantData{ m_swapChainExtent, static_cast<float>(glfwGetTime()) };
+        pushConstantData.extent = m_swapChainExtent;
+        pushConstantData.time = static_cast<float>(glfwGetTime());
+        // std::clog << pushConstantData.alpha << "\r" << std::flush;
 
         vkCmdPushConstants(m_commandBuffers[0], m_computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantData), reinterpret_cast<void *>(&pushConstantData));
         vkCmdPushConstants(m_commandBuffers[0], m_graphicsPipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstantData), reinterpret_cast<void *>(&pushConstantData));
@@ -1958,6 +1971,9 @@ private:
 
         vkDeviceWaitIdle(m_device);
 
+        if (ImGui::GetCurrentContext() != nullptr)
+            cleanUpImGui();
+
         cleanupSwapChain();
 
         createSwapChain();
@@ -1977,16 +1993,25 @@ private:
 
         // recreate compute descriptor sets
         // vkFreeDescriptorSets(m_device, m_computeDescriptorPool, 1, &m_computeDescriptorSet);
+
         vkDestroyDescriptorPool(m_device, m_computeDescriptorPool, nullptr);
+        // vkResetDescriptorPool(m_device, m_computeDescriptorPool, 0);
+
         vkDestroyDescriptorSetLayout(m_device, m_computeDescriptorSetLayout, nullptr);
         createComputeDescriptorSets();
 
         // recreate graphics descriptor sets
         // vkFreeDescriptorSets(m_device, m_graphicsDescriptorPool, m_graphicsDescriptorSets.size(), m_graphicsDescriptorSets.data());
+
         vkDestroyDescriptorPool(m_device, m_graphicsDescriptorPool, nullptr);
+        // vkResetDescriptorPool(m_device, m_graphicsDescriptorPool, 0);
+
         for (auto &layout : m_graphicsDescriptorSetLayouts)
             vkDestroyDescriptorSetLayout(m_device, layout, nullptr);
         createGraphicsDescriptorSets();
+
+        // recreateImGui();
+        setupImGui();
     }
 
     void cleanupSwapChain()
