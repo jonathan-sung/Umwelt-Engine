@@ -68,7 +68,7 @@ float3 getRayColor(Ray r)
     if (t > 0)
     {
         float3 normal = normalize(rayAt(r, t) - sphereCenter);
-        float3 sphereColor = pushConstants.alpha * (normal + float3(1, 1, 1));
+        float3 sphereColor = pushConstants.alpha * (normal + float3((1.0/pushConstants.alpha) - 1));
         return sphereColor;
     }
 
@@ -105,7 +105,7 @@ void computeMain(uint3 thread: SV_DispatchThreadID)
     float3 color = getRayColor(r);
 
     // Write to RWTexture2D in Slang
-    outputImage[threadID.xy] = float4(color, 1.0f);
+    outputImage[threadID.xy] = float4(color, 1.0);
 
     // outputImage[threadID.xy] = float4(special0, special1, special2, 1.0);
 }

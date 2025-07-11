@@ -88,6 +88,8 @@ private:
     std::vector<VkDescriptorSet> m_graphicsDescriptorSets;
     std::vector<VkDescriptorSetLayout> m_graphicsDescriptorSetLayouts{};
 
+    VkDescriptorPool m_ImGuiDescriptorPool = VK_NULL_HANDLE;
+
     VkRenderPass m_renderPass = VK_NULL_HANDLE;
 
     VkSemaphore imageAvailableSemaphore;
@@ -194,7 +196,7 @@ private:
     {
         VkExtent2D extent;
         float time;
-        float alpha = 1.0f;
+        float alpha = 0.5f;
     };
 
     const std::vector<const char *> validationLayers{
@@ -301,6 +303,7 @@ private:
 
     void setupImGui()
     {
+        createImGuiDescriptorSets();
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         ImGuiIO &io = ImGui::GetIO();
@@ -316,7 +319,7 @@ private:
         initInfo.Device = m_device;
         initInfo.QueueFamily = findQueueFamilies(m_physicalDevice).graphicsFamily.value();
         initInfo.Queue = m_graphicsQueue;
-        initInfo.DescriptorPool = m_graphicsDescriptorPool;
+        initInfo.DescriptorPool = m_ImGuiDescriptorPool;
         initInfo.RenderPass = m_renderPass;
         initInfo.MinImageCount = 2;
         initInfo.ImageCount = m_swapChainImageViews.size();
@@ -484,6 +487,33 @@ private:
                                                                          nullptr } };
 
         vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(graphicsWriteDescriptorSets.size()), graphicsWriteDescriptorSets.data(), 0, nullptr);
+    }
+
+    void createImGuiDescriptorSets()
+    {
+        std::vector<VkDescriptorPoolSize> poolSizes = {
+            { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+            { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+        };
+
+        VkDescriptorPoolCreateInfo imGuiDescriptorPoolInfo{
+            VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            nullptr,
+            VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+            1000, // ImGui likes to just allocate descriptor sets willy nilly so 1000 should be enough
+            static_cast<uint32_t>(poolSizes.size()),
+            poolSizes.data()
+        };
+        VK_CHECK(vkCreateDescriptorPool(m_device, &imGuiDescriptorPoolInfo, nullptr, &m_ImGuiDescriptorPool), "create ImGui descriptor pool");
     }
 
     void createUniformBuffer()
@@ -769,6 +799,7 @@ private:
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN,
             VK_FALSE
         };
+        // These have been moved to the dynamic states so no longer required
         // VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(m_swapChainExtent.width), static_cast<float>(m_swapChainExtent.height), 0.0f, 1.0f };
         // VkRect2D scissor{ { 0, 0 }, m_swapChainExtent };
 
@@ -1589,6 +1620,8 @@ private:
         vkDestroyDescriptorPool(m_device, m_computeDescriptorPool, nullptr);
         vkDestroyDescriptorSetLayout(m_device, m_computeDescriptorSetLayout, nullptr);
 
+        vkDestroyDescriptorPool(m_device, m_ImGuiDescriptorPool, nullptr);
+
         // pipeline objects
         for (auto pipeline : m_computePipelines)
             vkDestroyPipeline(m_device, pipeline, nullptr);
@@ -2010,6 +2043,7 @@ private:
             vkDestroyDescriptorSetLayout(m_device, layout, nullptr);
         createGraphicsDescriptorSets();
 
+        vkDestroyDescriptorPool(m_device, m_ImGuiDescriptorPool, nullptr);
         // recreateImGui();
         setupImGui();
     }
