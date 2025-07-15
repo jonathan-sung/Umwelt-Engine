@@ -219,6 +219,23 @@ private:
         // std::clog << "Cursor Position: (" << xPos << ", " << yPos << ")\r";
     }
 
+    static void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods)
+    {
+        if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+        {
+            if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED)
+            {
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
+            }
+            else
+            {
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+            }
+        }
+    }
+
     void initWindow()
     {
         if (glfwInit() == GLFW_FALSE)
@@ -244,6 +261,7 @@ private:
             glfwGetCursorPos(m_window, &previousMousePosition.x, &previousMousePosition.y);
         }
         glfwSetWindowUserPointer(m_window, this);
+        glfwSetKeyCallback(m_window, keyCallback);
     }
 
     void initVulkan()
@@ -296,10 +314,10 @@ private:
 
             ImGui::Text("This is some useful text."); // Display some text (you can use a format strings too)
 
-            ImGui::SliderFloat("alpha", &pushConstantData.alpha, 0.0f, 1.0f);                  // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::SliderFloat("Camera X", &pushConstantData.cameraPosition.x, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::SliderFloat("Camera Y", &pushConstantData.cameraPosition.y, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::SliderFloat("Camera Z", &pushConstantData.cameraPosition.z, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::SliderFloat("alpha", &pushConstantData.alpha, 0.001f, 1.0f);     // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::SliderFloat("Camera X", &cameraPositionOffset.x, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::SliderFloat("Camera Y", &cameraPositionOffset.y, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::SliderFloat("Camera Z", &cameraPositionOffset.z, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
 
             if (ImGui::Button("Button")) // Buttons return true when clicked (most widgets return true when edited/activated)
                 counter++;
@@ -1404,6 +1422,7 @@ private:
         auto space = glfwGetKey(m_window, GLFW_KEY_SPACE);
         auto leftCtrl = glfwGetKey(m_window, GLFW_KEY_LEFT_CONTROL);
         auto leftShift = glfwGetKey(m_window, GLFW_KEY_LEFT_SHIFT);
+        auto escape = glfwGetKey(m_window, GLFW_KEY_ESCAPE);
 
         if (leftShift == GLFW_PRESS)
             speed = 4.0f;

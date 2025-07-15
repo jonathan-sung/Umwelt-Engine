@@ -29,7 +29,7 @@ struct PushConstants
 [[vk::push_constant]]
 ConstantBuffer<PushConstants> pushConstants; // 128 bytes
 
-static const float infinity = 1.0 / 0.0;
+static const float infinity = float.maxValue;
 static const float PI = 3.14159265359;
 
 static float degreesToRadians(float degrees)
@@ -62,9 +62,45 @@ struct HitRecord
     }
 };
 
+struct Interval
+{
+    float min;
+    float max;
+
+    __init()
+    {
+        min = float.maxValue;
+        max = float.minValue;
+    }
+
+    __init(float min, float max)
+    {
+        this.min = min;
+        this.max = max;
+    }
+
+    float size()
+    {
+        return max - min;
+    }
+
+    bool contains(float x)
+    {
+        return min <= x && x <= max;
+    }
+
+    bool surrounds(float x)
+    {
+        return min < x && x < max;
+    }
+
+    static const Interval empty = Interval(float.maxValue, float.minValue);
+    static const Interval universe = Interval(float.minValue, float.maxValue);
+};
+
 interface IHittable
 {
-    bool hit(const Ray ray, float tMin, float tMax, inout HitRecord record);
+    bool hit(const Ray ray, Interval rayT, inout HitRecord record);
 };
 
 struct IHittableList : IHittable
@@ -76,16 +112,16 @@ struct IHittableList : IHittable
         this.objects = objects;
     }
 
-    override bool hit(const Ray ray, float tMin, float tMax, inout HitRecord record)
+    override bool hit(const Ray ray, Interval rayT, inout HitRecord record)
     {
         HitRecord tempHitRecord;
         bool hasHitSomething = false;
-        float closestSoFar = tMax;
+        float closestSoFar = rayT.max;
 
         // return true;
         for (uint i = 0; i < objects.getCount(); i++)
         {
-            if (objects[i].hit(ray, tMin, closestSoFar, tempHitRecord))
+            if (objects[i].hit(ray, Interval(rayT.min, closestSoFar), tempHitRecord))
             {
                 hasHitSomething = true;
                 closestSoFar = tempHitRecord.t;
@@ -108,7 +144,7 @@ struct Sphere : IHittable
         this.radius = max(0, radius);
     }
 
-    override bool hit(const Ray ray, float tMin, float tMax, inout HitRecord record)
+    override bool hit(const Ray ray, Interval rayT, inout HitRecord record)
     {
         float3 rayToSphereDirection = (center - ray.origin);
         float a = dot(ray.direction, ray.direction);
@@ -122,11 +158,11 @@ struct Sphere : IHittable
         float sqrtd = sqrt(discriminant);
 
         float root = (h - sqrtd) / a;
-        bool rootIsOutsideTheRangeOfTMinAndTMax = (root <= tMin || root >= tMax);
+        bool rootIsOutsideTheRangeOfTMinAndTMax = !(rayT.surrounds(root));
         if (rootIsOutsideTheRangeOfTMinAndTMax)
         {
-            root = (h + sqrtd) / a;                                              // Use the other root
-            rootIsOutsideTheRangeOfTMinAndTMax = (root <= tMin || root >= tMax); // Check if the new root is outside the range of tmin and tmax
+            root = (h + sqrtd) / a;                                       // Use the other root
+            rootIsOutsideTheRangeOfTMinAndTMax = !(rayT.surrounds(root)); // Check if the new root is outside the range of tmin and tmax
             if (rootIsOutsideTheRangeOfTMinAndTMax)
                 return false;
         }
@@ -140,58 +176,19 @@ struct Sphere : IHittable
     }
 };
 
-float3 getRayColorSingleObject(Ray ray, const IHittable object)
+float3 getRayColor(Ray ray, const IHittableList world)
 {
     HitRecord hitRecord = HitRecord();
-    bool isHit = object.hit(ray, 0.1, 1000.0, hitRecord);
+    bool isHit = world.hit(ray, Interval(0, float.maxValue), hitRecord);
     if (isHit)
     {
-        float3 colorOfHitPoint = pushConstants.alpha * (hitRecord.normal + float3((1.0 / pushConstants.alpha) - 1));
+        float3 colorOfHitPoint = 0.5 * (hitRecord.normal + float3(1.0));
         return colorOfHitPoint;
     }
 
     float3 unitDirection = normalize(ray.direction);
     float a = 0.5 * (unitDirection.y + 1.0);
     float3 backgroundColor = ((1.0 - a) * float3(1, 1, 1)) + (a * float3(0.5, 0.7, 1.0));
-
-    return backgroundColor;
-}
-
-float3 getRayColorList(Ray ray, const IHittable world[])
-{
-    HitRecord hitRecord = HitRecord();
-    for (uint i = 0; i < world.getCount(); i++)
-    {
-        bool isHit = world[i].hit(ray, 0.1, 1000.0, hitRecord);
-        if (isHit)
-        {
-            float3 colorOfHitPoint = pushConstants.alpha * (hitRecord.normal + float3((1.0 / pushConstants.alpha) - 1));
-            return colorOfHitPoint;
-        }
-    }
-
-    float3 unitDirection = normalize(ray.direction);
-    float a = 0.5 * (unitDirection.y + 1.0);
-    float3 backgroundColor = ((1.0 - a) * float3(1, 1, 1)) + (a * float3(bufferTest[0], 0.7, 1.0));
-
-    return backgroundColor;
-}
-
-float3 getRayColorWorld(Ray ray, const IHittableList world)
-{
-    HitRecord hitRecord = HitRecord();
-    bool isHit = world.hit(ray, 0.1, 1000.0, hitRecord);
-    if (isHit)
-    {
-        float3 colorOfHitPoint = pushConstants.alpha * (hitRecord.normal + float3((1.0 / pushConstants.alpha) - 1));
-        // float3 colorOfHitPoint = float3(pushConstants.alpha);
-        return colorOfHitPoint;
-    }
-
-    float3 unitDirection = normalize(ray.direction);
-    float a = 0.5 * (unitDirection.y + 1.0);
-    float3 backgroundColor = ((1.0 - a) * float3(1, 1, 1)) + (a * float3(0.5, 0.7, 1.0));
-
     return backgroundColor;
 }
 
@@ -229,7 +226,7 @@ void computeMain(uint3 thread: SV_DispatchThreadID)
     float3 pixelCenter = pixelUpperLeftCorner + (float(threadID.x) * pixelU) + (float(threadID.y) * pixelV);
     float3 rayDirection = pixelCenter - cameraCenter;
     Ray rayCameraToPixel = { cameraCenter, rayDirection };
-    float3 color = getRayColorWorld(rayCameraToPixel, world);
+    float3 color = getRayColor(rayCameraToPixel, world);
     // float3 color = getRayColorList(rayCameraToPixel, listOfObjects);
     // float3 color = getRayColor2(rayCameraToPixel, sphere);
 
