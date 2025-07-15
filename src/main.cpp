@@ -197,6 +197,7 @@ private:
         VkExtent2D extent;
         float time;
         float alpha = 0.5f;
+        glm::vec3 cameraPosition = glm::vec3(0.0f);
     };
 
     const std::vector<const char *> validationLayers{
@@ -289,7 +290,10 @@ private:
 
             ImGui::Text("This is some useful text."); // Display some text (you can use a format strings too)
 
-            ImGui::SliderFloat("float", &pushConstantData.alpha, 0.0f, 1.0f); // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::SliderFloat("alpha", &pushConstantData.alpha, 0.0f, 1.0f); // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::SliderFloat("Camera X", &pushConstantData.cameraPosition.x, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::SliderFloat("Camera Y", &pushConstantData.cameraPosition.y, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::SliderFloat("Camera Z", &pushConstantData.cameraPosition.z, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
 
             if (ImGui::Button("Button")) // Buttons return true when clicked (most widgets return true when edited/activated)
                 counter++;

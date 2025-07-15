@@ -14,6 +14,7 @@
 #CXX = g++
 #CXX = clang++
 
+SHADERS = $(wildcard shaders/*.spv)
 EXE = Umwelt
 SRC_DIR = src
 IMGUI_DIR = $(SRC_DIR)/imgui
@@ -86,4 +87,4 @@ run: $(EXE)
 	mangohud --dlsym ./$(EXE)
 
 clean:
-	rm -f $(EXE) $(OBJS)
+	rm -f $(EXE) $(OBJS) $(SHADERS)
