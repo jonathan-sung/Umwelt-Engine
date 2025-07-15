@@ -28,8 +28,6 @@
 #include <vector>
 #include <vulkan/vk_enum_string_helper.h>
 
-#define MAX_MEMORY (1024 * 1024) // 1 MB for Nuklear GUI memory
-
 #ifdef NDEBUG
 bool validationLayersEnabled = false;
 #else
@@ -132,8 +130,10 @@ private:
 
     // // Resources
     VkDeviceMemory m_computeImageMemory = VK_NULL_HANDLE;
+    VkDeviceMemory m_computeStorageBufferMemory = VK_NULL_HANDLE;
     VkImage m_computeImage = VK_NULL_HANDLE;
     VkImageView m_computeImageView = VK_NULL_HANDLE;
+    VkBuffer m_computeStorageBuffer = VK_NULL_HANDLE;
 
     // General member variables
     uint32_t m_width;
@@ -143,6 +143,9 @@ private:
 
     // GLFW member variables
     GLFWwindow *m_window;
+    glm::dvec2 previousMousePosition = glm::dvec2(0.0);
+    glm::dvec2 deltaMousePosition = glm::dvec2(0.0);
+    glm::vec3 cameraPositionOffset = glm::vec3(0.0f);
 
     struct QueueFamilyIndices
     {
@@ -198,6 +201,7 @@ private:
         float time;
         float alpha = 0.5f;
         glm::vec3 cameraPosition = glm::vec3(0.0f);
+        glm::vec3 cameraOrientationEulerAnglesInRadians = glm::vec3(0.0f);
     };
 
     const std::vector<const char *> validationLayers{
@@ -212,7 +216,7 @@ private:
 
     static void cursorPositionCallback(GLFWwindow *window, double xPos, double yPos)
     {
-        // std::clog << "Cursor Position: (" << xPos << ", " << yPos << ")\n";
+        // std::clog << "Cursor Position: (" << xPos << ", " << yPos << ")\r";
     }
 
     void initWindow()
@@ -234,10 +238,12 @@ private:
             throw std::runtime_error("GLFW raw mouse motion not supported!");
         else
         {
-            // glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-            // glfwSetInputMode(m_window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
-            // glfwSetCursorPosCallback(m_window, cursorPositionCallback);
+            glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            glfwSetInputMode(m_window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+            glfwSetCursorPosCallback(m_window, cursorPositionCallback);
+            glfwGetCursorPos(m_window, &previousMousePosition.x, &previousMousePosition.y);
         }
+        glfwSetWindowUserPointer(m_window, this);
     }
 
     void initVulkan()
@@ -290,7 +296,7 @@ private:
 
             ImGui::Text("This is some useful text."); // Display some text (you can use a format strings too)
 
-            ImGui::SliderFloat("alpha", &pushConstantData.alpha, 0.0f, 1.0f); // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::SliderFloat("alpha", &pushConstantData.alpha, 0.0f, 1.0f);                  // Edit 1 float using a slider from 0.0f to 1.0f
             ImGui::SliderFloat("Camera X", &pushConstantData.cameraPosition.x, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
             ImGui::SliderFloat("Camera Y", &pushConstantData.cameraPosition.y, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
             ImGui::SliderFloat("Camera Z", &pushConstantData.cameraPosition.z, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
@@ -341,7 +347,7 @@ private:
 
     void createComputeDescriptorSets()
     {
-        VkDescriptorSetLayoutBinding bindings{
+        VkDescriptorSetLayoutBinding storageImageBinding{
             0,
             VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
             1,
@@ -349,12 +355,22 @@ private:
             nullptr
         };
 
+        VkDescriptorSetLayoutBinding storageBufferBinding{};
+        storageBufferBinding.binding = 1;
+        storageBufferBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        storageBufferBinding.descriptorCount = 1;
+        storageBufferBinding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+        std::vector<VkDescriptorSetLayoutBinding> bindings{};
+        bindings.push_back(storageImageBinding);
+        bindings.push_back(storageBufferBinding);
+
         VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{
             VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             nullptr,
             0,
-            1,
-            &bindings
+            static_cast<uint32_t>(bindings.size()),
+            bindings.data()
         };
         VK_CHECK(vkCreateDescriptorSetLayout(m_device, &descriptorSetLayoutInfo, nullptr, &m_computeDescriptorSetLayout), "create descriptor set layout");
 
@@ -386,7 +402,7 @@ private:
             VK_IMAGE_LAYOUT_GENERAL
         };
 
-        VkWriteDescriptorSet descriptorWrites{
+        VkWriteDescriptorSet computeImageWrite{
             VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
             nullptr,
             m_computeDescriptorSet,
@@ -399,7 +415,23 @@ private:
             nullptr
         };
 
-        vkUpdateDescriptorSets(m_device, 1, &descriptorWrites, 0, nullptr);
+        VkDescriptorBufferInfo bufferInfo{};
+        bufferInfo.buffer = m_computeStorageBuffer;
+        bufferInfo.offset = 0;
+        bufferInfo.range = VK_WHOLE_SIZE;
+
+        VkWriteDescriptorSet computeBufferWrite{};
+        computeBufferWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        computeBufferWrite.dstSet = m_computeDescriptorSet;
+        computeBufferWrite.dstBinding = 1;
+        computeBufferWrite.dstArrayElement = 0;
+        computeBufferWrite.descriptorCount = 1;
+        computeBufferWrite.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        computeBufferWrite.pBufferInfo = &bufferInfo;
+
+        std::vector<VkWriteDescriptorSet> descriptorWrites = { computeImageWrite, computeBufferWrite };
+
+        vkUpdateDescriptorSets(m_device, descriptorWrites.size(), descriptorWrites.data(), 0, nullptr);
     }
 
     void createGraphicsDescriptorSets()
@@ -906,6 +938,33 @@ private:
     void createComputeResources()
     {
         createComputeImage();
+        createComputeStorageBuffer();
+    }
+
+    void createComputeStorageBuffer()
+    {
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        bufferInfo.size = sizeof(float);
+        VK_CHECK(vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_computeStorageBuffer), "create compute storage buffer");
+
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(m_device, m_computeStorageBuffer, &memoryRequirements);
+
+        VkMemoryAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        allocInfo.allocationSize = memoryRequirements.size;
+        allocInfo.memoryTypeIndex = getMemoryTypeIndex(memoryRequirements, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT).value();
+
+        VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_computeStorageBufferMemory), "allocate compute storage memory");
+        VK_CHECK(vkBindBufferMemory(m_device, m_computeStorageBuffer, m_computeStorageBufferMemory, 0), "bind compute storage memory");
+        float a = 1.0f;
+        void *data;
+        vkMapMemory(m_device, m_computeStorageBufferMemory, 0, VK_WHOLE_SIZE, 0, &data);
+        std::memcpy(data, &a, sizeof(a));
+        vkUnmapMemory(m_device, m_computeStorageBufferMemory);
     }
 
     void createComputeImage()
@@ -1335,14 +1394,64 @@ private:
             throw std::runtime_error("failed to create instance!");
         }
     }
+    void updateInput()
+    {
+        float speed = 1.0f;
+        auto w = glfwGetKey(m_window, GLFW_KEY_W);
+        auto a = glfwGetKey(m_window, GLFW_KEY_A);
+        auto s = glfwGetKey(m_window, GLFW_KEY_S);
+        auto d = glfwGetKey(m_window, GLFW_KEY_D);
+        auto space = glfwGetKey(m_window, GLFW_KEY_SPACE);
+        auto leftCtrl = glfwGetKey(m_window, GLFW_KEY_LEFT_CONTROL);
+        auto leftShift = glfwGetKey(m_window, GLFW_KEY_LEFT_SHIFT);
+
+        if (leftShift == GLFW_PRESS)
+            speed = 4.0f;
+        if (w == GLFW_PRESS)
+            cameraPositionOffset.z += -0.01f * speed;
+        if (a == GLFW_PRESS)
+            cameraPositionOffset.x += -0.01f * speed;
+        if (s == GLFW_PRESS)
+            cameraPositionOffset.z += 0.01f * speed;
+        if (d == GLFW_PRESS)
+            cameraPositionOffset.x += 0.01f * speed;
+        if (space == GLFW_PRESS)
+            cameraPositionOffset.y += 0.01f * speed;
+        if (leftCtrl == GLFW_PRESS)
+            cameraPositionOffset.y += -0.01f * speed;
+
+        double sensitivity = 0.01;
+        glm::dvec2 currentMousePosition = glm::dvec2(0.0);
+        glfwGetCursorPos(m_window, &currentMousePosition.x, &currentMousePosition.y);
+        deltaMousePosition = (currentMousePosition - previousMousePosition) * sensitivity;
+        previousMousePosition = currentMousePosition;
+    }
+
+    void updateCamera()
+    {
+        // glm::vec3 cameraPosition = glm::vec3(0.0f);
+        // pushConstantData.cameraOrientationEulerAnglesInRadians.y -= deltaMousePosition.x;
+        // pushConstantData.cameraOrientationEulerAnglesInRadians.x += deltaMousePosition.y;
+        // cameraPosition.x = cosf(pushConstantData.cameraOrientationEulerAnglesInRadians.y);
+        // cameraPosition.z = sinf(pushConstantData.cameraOrientationEulerAnglesInRadians.y);
+        pushConstantData.cameraPosition = cameraPositionOffset;
+    }
+
+    void update()
+    {
+        updateInput();
+        updateCamera();
+    }
+
     void mainLoop()
     {
         while (!glfwWindowShouldClose(m_window))
         {
-            renderImGui();
 
             glfwPollEvents();
 
+            update();
+            renderImGui();
             acquireImage();
             drawFrame();
             present();
@@ -1607,8 +1716,10 @@ private:
         // Buffers
         vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
         vkFreeMemory(m_device, m_uniformBufferMemory, nullptr);
+        vkFreeMemory(m_device, m_computeStorageBufferMemory, nullptr);
         vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
         vkDestroyBuffer(m_device, m_uniformBuffer, nullptr);
+        vkDestroyBuffer(m_device, m_computeStorageBuffer, nullptr);
 
         // Images
 

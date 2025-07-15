@@ -14,6 +14,9 @@ const float special2 = 0.0;
 [vk::binding(0, 0)]
 RWTexture2D<float4> outputImage;
 
+[vk::binding(1, 0)]
+RWStructuredBuffer<float> bufferTest;
+
 struct PushConstants
 {
     uint width;
@@ -66,20 +69,11 @@ interface IHittable
 
 struct IHittableList : IHittable
 {
-    IHittable objects[64];
-    uint currentObjectCount = 0;
+    IHittable objects[2];
 
-    [mutating]
-    void add(in IHittable object)
+    __init(IHittable objects[2])
     {
-        currentObjectCount = currentObjectCount + 1;
-        objects[currentObjectCount] = object;
-    }
-
-    [mutating]
-    void clear()
-    {
-        currentObjectCount = 0;
+        this.objects = objects;
     }
 
     override bool hit(const Ray ray, float tMin, float tMax, inout HitRecord record)
@@ -88,9 +82,9 @@ struct IHittableList : IHittable
         bool hasHitSomething = false;
         float closestSoFar = tMax;
 
-        for (uint i = 0; i < currentObjectCount; i++)
+        // return true;
+        for (uint i = 0; i < objects.getCount(); i++)
         {
-            return true;
             if (objects[i].hit(ray, tMin, closestSoFar, tempHitRecord))
             {
                 hasHitSomething = true;
@@ -178,7 +172,7 @@ float3 getRayColorList(Ray ray, const IHittable world[])
 
     float3 unitDirection = normalize(ray.direction);
     float a = 0.5 * (unitDirection.y + 1.0);
-    float3 backgroundColor = ((1.0 - a) * float3(1, 1, 1)) + (a * float3(0.5, 0.7, 1.0));
+    float3 backgroundColor = ((1.0 - a) * float3(1, 1, 1)) + (a * float3(bufferTest[0], 0.7, 1.0));
 
     return backgroundColor;
 }
@@ -189,8 +183,8 @@ float3 getRayColorWorld(Ray ray, const IHittableList world)
     bool isHit = world.hit(ray, 0.1, 1000.0, hitRecord);
     if (isHit)
     {
-        // float3 colorOfHitPoint = pushConstants.alpha * (hitRecord.normal + float3((1.0 / pushConstants.alpha) - 1));
-        float3 colorOfHitPoint = float3(pushConstants.alpha);
+        float3 colorOfHitPoint = pushConstants.alpha * (hitRecord.normal + float3((1.0 / pushConstants.alpha) - 1));
+        // float3 colorOfHitPoint = float3(pushConstants.alpha);
         return colorOfHitPoint;
     }
 
@@ -206,22 +200,19 @@ float3 getRayColorWorld(Ray ray, const IHittableList world)
 void computeMain(uint3 thread: SV_DispatchThreadID)
 {
     // World
-    IHittableList world;
     float3 center = float3(0, 0, -1);
     float radius = 0.5;
+
     Sphere sphere = Sphere(center, radius);
     Sphere sphere2 = Sphere(center + float3(0, -100 - radius, 0), 100);
 
     IHittable listOfObjects[] = { sphere, sphere2 };
-
-    world.add(sphere);
-    world.add(sphere2);
+    IHittableList world = IHittableList(listOfObjects);
 
     // Camera
     float focalLength = 1.0;
     float viewportHeight = 2.0;
     float viewportWidth = viewportHeight * (float(pushConstants.width) / float(pushConstants.height));
-    // float3 cameraCenter = float3(0, 0, 0);
     float3 cameraCenter = pushConstants.cameraPosition;
 
     float3 viewportU = float3(viewportWidth, 0, 0);
@@ -238,8 +229,8 @@ void computeMain(uint3 thread: SV_DispatchThreadID)
     float3 pixelCenter = pixelUpperLeftCorner + (float(threadID.x) * pixelU) + (float(threadID.y) * pixelV);
     float3 rayDirection = pixelCenter - cameraCenter;
     Ray rayCameraToPixel = { cameraCenter, rayDirection };
-    // float3 color = getRayColorWorld(rayCameraToPixel, world);
-    float3 color = getRayColorList(rayCameraToPixel, listOfObjects);
+    float3 color = getRayColorWorld(rayCameraToPixel, world);
+    // float3 color = getRayColorList(rayCameraToPixel, listOfObjects);
     // float3 color = getRayColor2(rayCameraToPixel, sphere);
 
     // Write to RWTexture2D in Slang
