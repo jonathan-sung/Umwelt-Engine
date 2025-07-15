@@ -221,7 +221,7 @@ private:
 
     static void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods)
     {
-        if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+        if (key == GLFW_KEY_SPACE && action == GLFW_PRESS)
         {
             if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED)
             {
@@ -234,6 +234,9 @@ private:
                 glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
             }
         }
+
+        if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
     }
 
     void initWindow()
@@ -1419,13 +1422,18 @@ private:
         auto a = glfwGetKey(m_window, GLFW_KEY_A);
         auto s = glfwGetKey(m_window, GLFW_KEY_S);
         auto d = glfwGetKey(m_window, GLFW_KEY_D);
-        auto space = glfwGetKey(m_window, GLFW_KEY_SPACE);
+        auto q = glfwGetKey(m_window, GLFW_KEY_Q);
+        auto e = glfwGetKey(m_window, GLFW_KEY_E);
+        auto r = glfwGetKey(m_window, GLFW_KEY_R);
         auto leftCtrl = glfwGetKey(m_window, GLFW_KEY_LEFT_CONTROL);
         auto leftShift = glfwGetKey(m_window, GLFW_KEY_LEFT_SHIFT);
-        auto escape = glfwGetKey(m_window, GLFW_KEY_ESCAPE);
 
         if (leftShift == GLFW_PRESS)
             speed = 4.0f;
+        if (leftCtrl == GLFW_PRESS)
+            speed = 0.5f;
+        if (leftCtrl == GLFW_PRESS && leftShift == GLFW_PRESS)
+            speed = 0.1f;
         if (w == GLFW_PRESS)
             cameraPositionOffset.z += -0.01f * speed;
         if (a == GLFW_PRESS)
@@ -1434,10 +1442,12 @@ private:
             cameraPositionOffset.z += 0.01f * speed;
         if (d == GLFW_PRESS)
             cameraPositionOffset.x += 0.01f * speed;
-        if (space == GLFW_PRESS)
+        if (q == GLFW_PRESS)
             cameraPositionOffset.y += 0.01f * speed;
-        if (leftCtrl == GLFW_PRESS)
+        if (e == GLFW_PRESS)
             cameraPositionOffset.y += -0.01f * speed;
+        if (r == GLFW_PRESS)
+            cameraPositionOffset = glm::vec3(0.0f);
 
         double sensitivity = 0.01;
         glm::dvec2 currentMousePosition = glm::dvec2(0.0);

@@ -1,4 +1,3 @@
-[require(SPV_KHR_non_semantic_info)]
 [SpecializationConstant]
 [vk::constant_id(0)]
 const float special0 = 0.0;
@@ -103,7 +102,7 @@ interface IHittable
     bool hit(const Ray ray, Interval rayT, inout HitRecord record);
 };
 
-struct IHittableList : IHittable
+struct HittableList : IHittable
 {
     IHittable objects[2];
 
@@ -176,21 +175,59 @@ struct Sphere : IHittable
     }
 };
 
-float3 getRayColor(Ray ray, const IHittableList world)
+struct Camera
 {
-    HitRecord hitRecord = HitRecord();
-    bool isHit = world.hit(ray, Interval(0, float.maxValue), hitRecord);
-    if (isHit)
+    float3 cameraCenter;
+    float3 pixelUpperLeftCorner;
+    float3 pixelU;
+    float3 pixelV;
+
+    __init()
     {
-        float3 colorOfHitPoint = 0.5 * (hitRecord.normal + float3(1.0));
-        return colorOfHitPoint;
+        float focalLength = 1.0;
+        float viewportHeight = 2.0;
+        float viewportWidth = viewportHeight * (float(pushConstants.width) / float(pushConstants.height));
+        cameraCenter = pushConstants.cameraPosition;
+
+        float3 viewportU = float3(viewportWidth, 0, 0);
+        float3 viewportV = float3(0, -viewportHeight, 0);
+
+        pixelU = viewportU / pushConstants.width;
+        pixelV = viewportV / pushConstants.height;
+
+        float3 viewportUpperLeftCorner = cameraCenter - float3(0, 0, focalLength) - (viewportU / 2) - (viewportV / 2);
+        pixelUpperLeftCorner = viewportUpperLeftCorner + (0.5 * (pixelU + pixelV));
     }
 
-    float3 unitDirection = normalize(ray.direction);
-    float a = 0.5 * (unitDirection.y + 1.0);
-    float3 backgroundColor = ((1.0 - a) * float3(1, 1, 1)) + (a * float3(0.5, 0.7, 1.0));
-    return backgroundColor;
-}
+    [mutating]
+    void render(uint3 thread, const HittableList world)
+    {
+        float3 pixelCenter = pixelUpperLeftCorner + (float(thread.x) * pixelU) + (float(thread.y) * pixelV);
+        float3 rayDirection = pixelCenter - cameraCenter;
+        Ray rayCameraToPixel = { cameraCenter, rayDirection };
+        float3 color = rayColor(rayCameraToPixel, world);
+        outputImage[thread.xy] = float4(color, 1.0);
+    }
+
+    float3 rayColor(const Ray ray, const HittableList world)
+    {
+        HitRecord hitRecord = HitRecord();
+        bool objectWasHit = world.hit(ray, Interval(0, float.maxValue), hitRecord);
+        if (objectWasHit)
+        {
+            float3 colorOfHitPoint = 0.5 * (hitRecord.normal + float3(1.0));
+            return colorOfHitPoint;
+        }
+        else
+        {
+            float3 unitDirection = normalize(ray.direction);
+            float a = 0.5 * (unitDirection.y + 1.0);
+            float3 blueSky = float3(0.5, 0.7, 1.0);
+            float3 backgroundColor = ((1.0 - a) * float3(1, 1, 1)) + (a * blueSky);
+            return backgroundColor;
+        }
+    }
+};
 
 [shader("compute")]
 [numthreads(16, 16, 1)]
@@ -204,34 +241,8 @@ void computeMain(uint3 thread: SV_DispatchThreadID)
     Sphere sphere2 = Sphere(center + float3(0, -100 - radius, 0), 100);
 
     IHittable listOfObjects[] = { sphere, sphere2 };
-    IHittableList world = IHittableList(listOfObjects);
+    HittableList world = HittableList(listOfObjects);
 
-    // Camera
-    float focalLength = 1.0;
-    float viewportHeight = 2.0;
-    float viewportWidth = viewportHeight * (float(pushConstants.width) / float(pushConstants.height));
-    float3 cameraCenter = pushConstants.cameraPosition;
-
-    float3 viewportU = float3(viewportWidth, 0, 0);
-    float3 viewportV = float3(0, -viewportHeight, 0);
-
-    float3 pixelU = viewportU / pushConstants.width;
-    float3 pixelV = viewportV / pushConstants.height;
-
-    float3 viewportUpperLeftCorner = cameraCenter - float3(0, 0, focalLength) - (viewportU / 2) - (viewportV / 2);
-    float3 pixelUpperLeftCorner = viewportUpperLeftCorner + (0.5 * (pixelU + pixelV));
-
-    // In Slang, use threadID instead of gl_GlobalInvocationID
-    uint3 threadID = uint3(thread.xy, 0);
-    float3 pixelCenter = pixelUpperLeftCorner + (float(threadID.x) * pixelU) + (float(threadID.y) * pixelV);
-    float3 rayDirection = pixelCenter - cameraCenter;
-    Ray rayCameraToPixel = { cameraCenter, rayDirection };
-    float3 color = getRayColor(rayCameraToPixel, world);
-    // float3 color = getRayColorList(rayCameraToPixel, listOfObjects);
-    // float3 color = getRayColor2(rayCameraToPixel, sphere);
-
-    // Write to RWTexture2D in Slang
-    outputImage[threadID.xy] = float4(color, 1.0);
-
-    // outputImage[threadID.xy] = float4(special0, special1, special2, 1.0);
+    Camera camera = Camera();
+    camera.render(thread, world);
 }
