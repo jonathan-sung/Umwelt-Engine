@@ -1,11 +1,16 @@
 # Path Tracing with Vulkan
 
+
 ## Introduction
 
 This project demonstrates a simple path tracing implementation using Vulkan. It consists of two main components:
 
 1. A compute shader that performs path tracing and outputs the result to a `VkImage`.
 2. A graphics pipeline that fills the screen with two triangles and samples a texture, which is the `VkImage` produced by the compute shader.
+
+![Screenshot](screenshots/2025-07-15_22-38-50.png)
+
+The compute shader is written in Slang, a high-level shading language that compiles to SPIR-V. The graphics pipeline is implemented using Vulkan and GLFW for window management.
 
 ## Building
 
