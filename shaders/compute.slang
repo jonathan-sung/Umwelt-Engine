@@ -30,10 +30,25 @@ ConstantBuffer<PushConstants> pushConstants; // 128 bytes
 
 static const float infinity = float.maxValue;
 static const float PI = 3.14159265359;
+static uint3 g_thread;
+static float randomCounter = 0;
 
 static float degreesToRadians(float degrees)
 {
     return (degrees * PI) / 180.0;
+}
+
+// pseudo random number generator
+static float random()
+{
+    float2 uv = float2(float(g_thread.x) + randomCounter + pushConstants.time, float(g_thread.y) + randomCounter + pushConstants.time);
+    randomCounter++;
+    return fract(sin(dot(uv.xy, float2(12.9898, 78.233))) * 43758.5453123);
+}
+
+static float random(float min, float max)
+{
+    return min + (max - min) * random();
 }
 
 struct Ray
@@ -91,6 +106,15 @@ struct Interval
     bool surrounds(float x)
     {
         return min < x && x < max;
+    }
+
+    float clamp(float x)
+    {
+        if (x < min)
+            return min;
+        if (x > max)
+            return max;
+        return x;
     }
 
     static const Interval empty = Interval(float.maxValue, float.minValue);
@@ -181,8 +205,11 @@ struct Camera
     float3 pixelUpperLeftCorner;
     float3 pixelU;
     float3 pixelV;
+    uint samplesPerPixel = 100;
+    float pixelSamplesScale;
+    uint3 thread;
 
-    __init()
+    __init(uint3 thread)
     {
         float focalLength = 1.0;
         float viewportHeight = 2.0;
@@ -197,16 +224,38 @@ struct Camera
 
         float3 viewportUpperLeftCorner = cameraCenter - float3(0, 0, focalLength) - (viewportU / 2) - (viewportV / 2);
         pixelUpperLeftCorner = viewportUpperLeftCorner + (0.5 * (pixelU + pixelV));
+        pixelSamplesScale = 1.0 / samplesPerPixel;
+        this.thread = thread;
     }
 
     [mutating]
-    void render(uint3 thread, const HittableList world)
+    void render(const HittableList world)
     {
-        float3 pixelCenter = pixelUpperLeftCorner + (float(thread.x) * pixelU) + (float(thread.y) * pixelV);
-        float3 rayDirection = pixelCenter - cameraCenter;
-        Ray rayCameraToPixel = { cameraCenter, rayDirection };
-        float3 color = rayColor(rayCameraToPixel, world);
+        float3 color = float3(0.0);
+        for (uint sample = 0; sample < samplesPerPixel; sample++)
+        {
+            Ray ray = getRay(thread.xy);
+            color += rayColor(ray, world);
+        }
+        color *= pixelSamplesScale;
+
         outputImage[thread.xy] = float4(color, 1.0);
+    }
+
+    Ray getRay(uint2 thread)
+    {
+        float3 offset = sampleSquare();
+        float3 pixelCenter = pixelUpperLeftCorner + ((float(thread.x) + offset.x) * pixelU) + ((float(thread.y) + offset.y) * pixelV);
+        float3 rayDirection = pixelCenter - cameraCenter;
+
+        Ray rayCameraToPixel = { cameraCenter, rayDirection };
+        return rayCameraToPixel;
+    }
+
+    float3 sampleSquare()
+    {
+        return float3(random() - 0.5, random() - 0.5, 0);
+        // return float3(random(0, 4) - 2, random(0, 4) - 2, 0);
     }
 
     float3 rayColor(const Ray ray, const HittableList world)
@@ -233,6 +282,7 @@ struct Camera
 [numthreads(16, 16, 1)]
 void computeMain(uint3 thread: SV_DispatchThreadID)
 {
+    g_thread = thread;
     // World
     float3 center = float3(0, 0, -1);
     float radius = 0.5;
@@ -243,6 +293,6 @@ void computeMain(uint3 thread: SV_DispatchThreadID)
     IHittable listOfObjects[] = { sphere, sphere2 };
     HittableList world = HittableList(listOfObjects);
 
-    Camera camera = Camera();
-    camera.render(thread, world);
+    Camera camera = Camera(thread);
+    camera.render(world);
 }
