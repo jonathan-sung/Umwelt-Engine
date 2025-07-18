@@ -41,7 +41,9 @@ static float degreesToRadians(float degrees)
 // pseudo random number generator
 static float random()
 {
-    float2 uv = float2(float(g_thread.x) + randomCounter + pushConstants.time, float(g_thread.y) + randomCounter + pushConstants.time);
+    // Update randomCounter using a Linear Congruential Generator (LCG)
+
+    float2 uv = float2(float(g_thread.x) + randomCounter, float(g_thread.y) + randomCounter);
     randomCounter++;
     return fract(sin(dot(uv.xy, float2(12.9898, 78.233))) * 43758.5453123);
 }
@@ -49,6 +51,36 @@ static float random()
 static float random(float min, float max)
 {
     return min + (max - min) * random();
+}
+
+static float3 randomFloat3()
+{
+    return float3(random(), random(), random());
+}
+
+static float3 randomFloat3(float min, float max)
+{
+    return float3(random(min, max), random(min, max), random(min, max));
+}
+
+static float3 randomUnitVectorFloat3()
+{
+    while (true)
+    {
+        float3 point = randomFloat3(-1, 1);
+        float lengthSquared = dot(point, point);
+        if (1e-16 < lengthSquared && lengthSquared <= 1)
+            return point / sqrt(lengthSquared);
+    }
+}
+
+static float3 randomOnHemisphere(const float3 normal)
+{
+    float3 onUnitSphere = randomUnitVectorFloat3();
+    if (dot(normal, onUnitSphere) > 0.0)
+        return onUnitSphere;
+    else
+        return -onUnitSphere;
 }
 
 struct Ray
@@ -185,7 +217,7 @@ struct Sphere : IHittable
         if (rootIsOutsideTheRangeOfTMinAndTMax)
         {
             root = (h + sqrtd) / a;                                       // Use the other root
-            rootIsOutsideTheRangeOfTMinAndTMax = !(rayT.surrounds(root)); // Check if the new root is outside the range of tmin and tmax
+            rootIsOutsideTheRangeOfTMinAndTMax = !(rayT.surrounds(root)); // Check again to see if the new root is outside the range of tmin and tmax
             if (rootIsOutsideTheRangeOfTMinAndTMax)
                 return false;
         }
@@ -235,7 +267,7 @@ struct Camera
         for (uint sample = 0; sample < samplesPerPixel; sample++)
         {
             Ray ray = getRay(thread.xy);
-            color += rayColor(ray, world);
+            color += rayColor(ray, 5, world);
         }
         color *= pixelSamplesScale;
 
@@ -255,26 +287,37 @@ struct Camera
     float3 sampleSquare()
     {
         return float3(random() - 0.5, random() - 0.5, 0);
-        // return float3(random(0, 4) - 2, random(0, 4) - 2, 0);
     }
 
-    float3 rayColor(const Ray ray, const HittableList world)
+    float3 rayColor(const Ray ray, uint maxLightBounces, const HittableList world)
     {
         HitRecord hitRecord = HitRecord();
-        bool objectWasHit = world.hit(ray, Interval(0, float.maxValue), hitRecord);
-        if (objectWasHit)
+        Ray currentRay = ray;
+        float3 color = float3(1.0);
+        for (uint i = 0; i < maxLightBounces; i++)
         {
-            float3 colorOfHitPoint = 0.5 * (hitRecord.normal + float3(1.0));
-            return colorOfHitPoint;
+            bool objectWasHit = world.hit(currentRay, Interval(0.001, float.maxValue), hitRecord);
+            if (objectWasHit)
+            {
+                float3 diffuseDirection = randomOnHemisphere(hitRecord.normal);
+                currentRay = Ray(hitRecord.position, diffuseDirection);
+                color *= 0.5;
+            }
+            else
+            {
+                float3 unitDirection = normalize(currentRay.direction);
+                float a = 0.5 * (unitDirection.y + 1.0);
+                float3 blueSky = float3(0.5, 0.7, 1.0);
+                float3 backgroundColor = ((1.0 - a) * float3(1, 1, 1)) + (a * blueSky);
+                color *= backgroundColor;
+                return color;
+            }
         }
+        bool colorNotChanged = all(color == float3(1.0));
+        if (colorNotChanged)
+            return float3(0.0);
         else
-        {
-            float3 unitDirection = normalize(ray.direction);
-            float a = 0.5 * (unitDirection.y + 1.0);
-            float3 blueSky = float3(0.5, 0.7, 1.0);
-            float3 backgroundColor = ((1.0 - a) * float3(1, 1, 1)) + (a * blueSky);
-            return backgroundColor;
-        }
+            return color;
     }
 };
 

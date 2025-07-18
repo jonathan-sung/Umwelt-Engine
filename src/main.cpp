@@ -28,6 +28,8 @@
 #include <vector>
 #include <vulkan/vk_enum_string_helper.h>
 
+using namespace ImGui;
+
 #ifdef NDEBUG
 bool validationLayersEnabled = false;
 #else
@@ -2202,6 +2204,7 @@ private:
 
         vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
     }
+
 };
 
 int main()
