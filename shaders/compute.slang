@@ -32,6 +32,7 @@ static const float infinity = float.maxValue;
 static const float PI = 3.14159265359;
 static uint3 g_thread;
 static float randomCounter = 0;
+static uint seed = (g_thread.x - g_thread.y);
 
 static float degreesToRadians(float degrees)
 {
@@ -42,9 +43,12 @@ static float degreesToRadians(float degrees)
 static float random()
 {
     // Update randomCounter using a Linear Congruential Generator (LCG)
+    uint a = 1664525;
+    uint c = 1013904223;
+    uint m = 1 << 16;
+    seed = ((a * seed) + c) % m;
 
-    float2 uv = float2(float(g_thread.x) + randomCounter, float(g_thread.y) + randomCounter);
-    randomCounter++;
+    float2 uv = float2(float(g_thread.x) + seed, float(g_thread.y) - seed);
     return fract(sin(dot(uv.xy, float2(12.9898, 78.233))) * 43758.5453123);
 }
 
