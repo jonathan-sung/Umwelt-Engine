@@ -28,11 +28,26 @@ struct PushConstants
 [[vk::push_constant]]
 ConstantBuffer<PushConstants> pushConstants; // 128 bytes
 
+// Global variables
+
 static const float infinity = float.maxValue;
 static const float PI = 3.14159265359;
 static uint3 g_thread;
 static float randomCounter = 0;
 static uint seed = (g_thread.x - g_thread.y);
+
+// Global functions
+
+static float3 reflect(float3 incident, float3 normal)
+{
+    return incident - ((2 * dot(incident, normal)) * normal);
+}
+
+static bool nearZeroFloat3(float3 v)
+{
+    float epsilon = 1e-8;
+    return (abs(v.x) < epsilon) && (abs(v.y) < epsilon) && (abs(v.z) < epsilon);
+}
 
 static float degreesToRadians(float degrees)
 {
@@ -57,11 +72,15 @@ static float random()
     // Update randomCounter using a Linear Congruential Generator (LCG)
     uint a = 1664525;
     uint c = 1013904223;
-    uint m = 1 << 16;
-    seed = ((a * seed) + c) % m;
+    // uint m = 1 << 16;
+    seed = ((a * seed) + c); // % m;
 
-    float2 uv = float2(float(g_thread.x) + seed, float(g_thread.y) - seed);
+    float2 uv = float2(float(g_thread.x) + float(seed) / 4294967296.0, float(g_thread.y) - float(seed) / 4294967296.0);
+
+    // Hash-like transformation to produce a float in [0,1)
     return fract(sin(dot(uv.xy, float2(12.9898, 78.233))) * 43758.5453123);
+
+    // return float(seed) / 4294967296.0; // 2^32
 }
 
 static float random(float min, float max)
@@ -99,6 +118,23 @@ static float3 randomOnHemisphere(const float3 normal)
         return -onUnitSphere;
 }
 
+// Interfaces
+
+interface IMaterial
+{
+    bool scatter(const Ray rayIncident, const HitRecord record, inout float3 attenuation, inout Ray scattered)
+    {
+        return false;
+    }
+};
+
+interface IHittable
+{
+    bool hit(const Ray ray, Interval rayT, inout HitRecord record);
+};
+
+// Structs
+
 struct Ray
 {
     float3 origin;
@@ -113,6 +149,7 @@ struct HitRecord
 {
     float3 position;
     float3 normal;
+    IMaterial material;
     float t;
     bool frontFace;
 
@@ -169,16 +206,11 @@ struct Interval
     static const Interval universe = Interval(float.minValue, float.maxValue);
 };
 
-interface IHittable
-{
-    bool hit(const Ray ray, Interval rayT, inout HitRecord record);
-};
-
 struct HittableList : IHittable
 {
-    IHittable objects[2];
+    IHittable objects[4];
 
-    __init(IHittable objects[2])
+    __init(IHittable objects[4])
     {
         this.objects = objects;
     }
@@ -208,11 +240,13 @@ struct Sphere : IHittable
 {
     float3 center;
     float radius;
+    IMaterial material;
 
-    __init(float3 center, float radius)
+    __init(float3 center, float radius, IMaterial material)
     {
         this.center = center;
         this.radius = max(0, radius);
+        this.material = material;
     }
 
     override bool hit(const Ray ray, Interval rayT, inout HitRecord record)
@@ -242,6 +276,7 @@ struct Sphere : IHittable
         record.position = ray.at(record.t);
         float3 outwardNormal = (record.position - center) / radius;
         record.setFaceNormal(ray, outwardNormal);
+        record.material = material;
 
         return true;
     }
@@ -253,7 +288,7 @@ struct Camera
     float3 pixelUpperLeftCorner;
     float3 pixelU;
     float3 pixelV;
-    uint samplesPerPixel = 20;
+    uint samplesPerPixel = 30;
     float pixelSamplesScale;
     uint3 thread;
 
@@ -315,10 +350,17 @@ struct Camera
             bool objectWasHit = world.hit(currentRay, Interval(0.001, float.maxValue), hitRecord);
             if (objectWasHit)
             {
+                Ray scattered;
+                float3 attenuation;
+                if (hitRecord.material.scatter(currentRay, hitRecord, attenuation, scattered))
+                    color *= attenuation;
+                else
+                    color *= 1.0;
+
                 // lambertian cosine distributed diffuse - more rays bounce off nearer the surface normal
-                float3 diffuseDirection = hitRecord.normal + randomUnitVectorFloat3(); // randomOnHemisphere(hitRecord.normal);
-                currentRay = Ray(hitRecord.position, diffuseDirection);
-                color *= 0.5;
+                // float3 diffuseDirection = hitRecord.normal + randomUnitVectorFloat3(); // randomOnHemisphere(hitRecord.normal);
+                // color *= 0.5;
+                currentRay = Ray(hitRecord.position, scattered.direction);
             }
             else
             {
@@ -330,6 +372,8 @@ struct Camera
                 return color;
             }
         }
+        if (all(color == 1.0))
+            color = float(0.0);
         return color;
         // bool colorNotChanged = all(color == float3(1.0));
         // if (colorNotChanged)
@@ -339,19 +383,64 @@ struct Camera
     }
 };
 
+// Materials
+
+struct Lambertian : IMaterial
+{
+    float3 albedo;
+
+    __init(const float3 albedo)
+    {
+        this.albedo = albedo;
+    }
+
+    override bool scatter(const Ray rayIncident, const HitRecord record, inout float3 attenuation, inout Ray scattered)
+    {
+        float3 scatteredDirection = record.normal + randomUnitVectorFloat3();
+        if (nearZeroFloat3(scatteredDirection))
+            scatteredDirection = record.normal;
+        scattered = Ray(record.position, scatteredDirection);
+        attenuation = albedo;
+        return true;
+    }
+};
+
+struct Metal : IMaterial
+{
+    float3 albedo;
+
+    __init(const float3 albedo)
+    {
+        this.albedo = albedo;
+    }
+
+    override bool scatter(const Ray rayIncident, const HitRecord record, inout float3 attenuation, inout Ray scattered)
+    {
+        float3 reflected = reflect(rayIncident.direction, record.normal);
+        scattered = Ray(record.position, reflected);
+        attenuation = albedo;
+        return true;
+    }
+};
+
 [shader("compute")]
 [numthreads(16, 16, 1)]
 void computeMain(uint3 thread: SV_DispatchThreadID)
 {
     g_thread = thread;
     // World
-    float3 center = float3(0, 0, -1);
-    float radius = 0.5;
 
-    Sphere sphere = Sphere(center, radius);
-    Sphere sphere2 = Sphere(center + float3(0, -100 - radius, 0), 100);
+    Lambertian materialGround = Lambertian(float3(0.8, 0.8, 0.0));
+    Lambertian materialCenter = Lambertian(float3(0.1, 0.2, 0.5));
+    Metal materialLeft = Metal(float3(0.8, 0.8, 0.8));
+    Metal materialRight = Metal(float3(0.8, 0.6, 0.2));
 
-    IHittable listOfObjects[] = { sphere, sphere2 };
+    Sphere ground = Sphere(float3(0.0, -100.5, -1.0), 100.0, materialGround);
+    Sphere sphereCenter = Sphere(float3(0.0, 0.0, -1.2), 0.5, materialCenter);
+    Sphere sphereLeft = Sphere(float3(-1.0, 0.0, -1.0), 0.5, materialLeft);
+    Sphere sphereRight = Sphere(float3(1.0, 0.0, -1.0), 0.5, materialRight);
+
+    IHittable listOfObjects[] = { ground, sphereCenter, sphereLeft, sphereRight };
     HittableList world = HittableList(listOfObjects);
 
     Camera camera = Camera(thread);
