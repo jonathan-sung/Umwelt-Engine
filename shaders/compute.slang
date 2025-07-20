@@ -39,6 +39,18 @@ static float degreesToRadians(float degrees)
     return (degrees * PI) / 180.0;
 }
 
+static float3 linearToGammaColor(float3 linearColor)
+{
+    float3 gammaCorrectedColor = float3(0.0);
+    if (linearColor.x > 0.0)
+        gammaCorrectedColor.x = sqrt(linearColor.x);
+    if (linearColor.y > 0.0)
+        gammaCorrectedColor.y = sqrt(linearColor.y);
+    if (linearColor.z > 0.0)
+        gammaCorrectedColor.z = sqrt(linearColor.z);
+    return gammaCorrectedColor;
+}
+
 // pseudo random number generator
 static float random()
 {
@@ -241,7 +253,7 @@ struct Camera
     float3 pixelUpperLeftCorner;
     float3 pixelU;
     float3 pixelV;
-    uint samplesPerPixel = 100;
+    uint samplesPerPixel = 20;
     float pixelSamplesScale;
     uint3 thread;
 
@@ -271,10 +283,10 @@ struct Camera
         for (uint sample = 0; sample < samplesPerPixel; sample++)
         {
             Ray ray = getRay(thread.xy);
-            color += rayColor(ray, 5, world);
+            color += rayColor(ray, 50, world);
         }
         color *= pixelSamplesScale;
-
+        color = linearToGammaColor(color);
         outputImage[thread.xy] = float4(color, 1.0);
     }
 
@@ -303,7 +315,8 @@ struct Camera
             bool objectWasHit = world.hit(currentRay, Interval(0.001, float.maxValue), hitRecord);
             if (objectWasHit)
             {
-                float3 diffuseDirection = randomOnHemisphere(hitRecord.normal);
+                // lambertian cosine distributed diffuse - more rays bounce off nearer the surface normal
+                float3 diffuseDirection = hitRecord.normal + randomUnitVectorFloat3(); // randomOnHemisphere(hitRecord.normal);
                 currentRay = Ray(hitRecord.position, diffuseDirection);
                 color *= 0.5;
             }
@@ -317,11 +330,12 @@ struct Camera
                 return color;
             }
         }
-        bool colorNotChanged = all(color == float3(1.0));
-        if (colorNotChanged)
-            return float3(0.0);
-        else
-            return color;
+        return color;
+        // bool colorNotChanged = all(color == float3(1.0));
+        // if (colorNotChanged)
+        //     return float3(0.0);
+        // else
+        //     return color;
     }
 };
 
