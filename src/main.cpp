@@ -319,7 +319,7 @@ private:
 
             ImGui::Text("This is some useful text."); // Display some text (you can use a format strings too)
 
-            ImGui::SliderFloat("alpha", &pushConstantData.alpha, 0.001f, 1.0f);     // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::SliderFloat("alpha", &pushConstantData.alpha, 0.0f, 1.0f);     // Edit 1 float using a slider from 0.0f to 1.0f
             ImGui::SliderFloat("Camera X", &cameraPositionOffset.x, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
             ImGui::SliderFloat("Camera Y", &cameraPositionOffset.y, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
             ImGui::SliderFloat("Camera Z", &cameraPositionOffset.z, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f

@@ -43,6 +43,21 @@ static float3 reflect(float3 incident, float3 normal)
     return incident - ((2 * dot(incident, normal)) * normal);
 }
 
+// incident ray must be normalize before used as input
+static float3 refract(float3 incident, float3 normal, float refractionIndexRatio)
+{
+    float cosTheta = min(dot(-incident, normal), 1.0);
+    float3 refractedPerpendicular = refractionIndexRatio * (incident + cosTheta * normal);
+    float3 refractedParallel = -sqrt(abs(1 - lengthSquaredFloat3(refractedPerpendicular))) * normal;
+    float3 refracted = refractedPerpendicular + refractedParallel;
+    return refracted;
+}
+
+static float lengthSquaredFloat3(float3 v)
+{
+    return dot(v, v);
+}
+
 static bool nearZeroFloat3(float3 v)
 {
     float epsilon = 1e-8;
@@ -208,9 +223,9 @@ struct Interval
 
 struct HittableList : IHittable
 {
-    IHittable objects[4];
+    IHittable objects[6];
 
-    __init(IHittable objects[4])
+    __init(IHittable objects[6])
     {
         this.objects = objects;
     }
@@ -288,7 +303,7 @@ struct Camera
     float3 pixelUpperLeftCorner;
     float3 pixelU;
     float3 pixelV;
-    uint samplesPerPixel = 30;
+    uint samplesPerPixel = 10;
     float pixelSamplesScale;
     uint3 thread;
 
@@ -318,7 +333,7 @@ struct Camera
         for (uint sample = 0; sample < samplesPerPixel; sample++)
         {
             Ray ray = getRay(thread.xy);
-            color += rayColor(ray, 50, world);
+            color += rayColor(ray, 20, world);
         }
         color *= pixelSamplesScale;
         color = linearToGammaColor(color);
@@ -345,21 +360,23 @@ struct Camera
         HitRecord hitRecord = HitRecord();
         Ray currentRay = ray;
         float3 color = float3(1.0);
+        bool anyHit = false;
         for (uint i = 0; i < maxLightBounces; i++)
         {
             bool objectWasHit = world.hit(currentRay, Interval(0.001, float.maxValue), hitRecord);
             if (objectWasHit)
             {
+                anyHit = true;
                 Ray scattered;
                 float3 attenuation;
                 if (hitRecord.material.scatter(currentRay, hitRecord, attenuation, scattered))
                     color *= attenuation;
                 else
-                    color *= 1.0;
+                {
+                    color *= 0.0;
+                    break;
+                }
 
-                // lambertian cosine distributed diffuse - more rays bounce off nearer the surface normal
-                // float3 diffuseDirection = hitRecord.normal + randomUnitVectorFloat3(); // randomOnHemisphere(hitRecord.normal);
-                // color *= 0.5;
                 currentRay = Ray(hitRecord.position, scattered.direction);
             }
             else
@@ -372,14 +389,9 @@ struct Camera
                 return color;
             }
         }
-        if (all(color == 1.0))
-            color = float(0.0);
+        if (!anyHit)
+            return float3(0.0); // nothing hit
         return color;
-        // bool colorNotChanged = all(color == float3(1.0));
-        // if (colorNotChanged)
-        //     return float3(0.0);
-        // else
-        //     return color;
     }
 };
 
@@ -408,20 +420,65 @@ struct Lambertian : IMaterial
 struct Metal : IMaterial
 {
     float3 albedo;
+    float fuzz;
 
-    __init(const float3 albedo)
+    __init(const float3 albedo, const float fuzz)
     {
         this.albedo = albedo;
+        this.fuzz = fuzz;
     }
 
     override bool scatter(const Ray rayIncident, const HitRecord record, inout float3 attenuation, inout Ray scattered)
     {
         float3 reflected = reflect(rayIncident.direction, record.normal);
+        reflected = normalize(reflected) + (fuzz * randomUnitVectorFloat3());
         scattered = Ray(record.position, reflected);
         attenuation = albedo;
-        return true;
+        return (dot(scattered.direction, record.normal) > 0.0);
     }
 };
+
+struct Dielectric : IMaterial
+{
+    float refractionIndex;
+
+    __init(float refractionIndex)
+    {
+        // ratio: refractive index of material / refractive index of surrounding medium
+        // e.g. 1.5/1.0 would mean the material is made of glass (1.5), and it is surrounded by air since the refractive index of air is very close to 1.0
+        this.refractionIndex = refractionIndex;
+    }
+
+    override bool scatter(const Ray rayIncident, const HitRecord record, inout float3 attenuation, inout Ray scattered)
+    {
+        attenuation = float3(1.0);
+        float ri = record.frontFace ? (1.0 / refractionIndex) : refractionIndex;
+
+        float3 unitDirection = normalize(rayIncident.direction);
+        float cosTheta = min(dot(-unitDirection, record.normal), 1.0);
+        float sinTheta = sqrt(1 - cosTheta * cosTheta);
+
+        bool cannotRefract = ri * sinTheta > 1.0;
+        float3 refractedDirection;
+
+        // angle is very steep so instead of refracting the light, it reflects it
+        if (cannotRefract || reflectance(cosTheta, ri) > random())
+            refractedDirection = reflect(unitDirection, record.normal);
+        else
+            refractedDirection = refract(unitDirection, record.normal, ri);
+
+        scattered = Ray(record.position, refractedDirection);
+        return true;
+    }
+
+    // schlick approximation
+    float reflectance(float cosine, float refractionIndex)
+    {
+        float r0 = (1 - refractionIndex) / (1 + refractionIndex);
+        r0 = r0 * r0;
+        return r0 + (1 - r0) * pow((1 - cosine), 5);
+    }
+}
 
 [shader("compute")]
 [numthreads(16, 16, 1)]
@@ -432,15 +489,20 @@ void computeMain(uint3 thread: SV_DispatchThreadID)
 
     Lambertian materialGround = Lambertian(float3(0.8, 0.8, 0.0));
     Lambertian materialCenter = Lambertian(float3(0.1, 0.2, 0.5));
-    Metal materialLeft = Metal(float3(0.8, 0.8, 0.8));
-    Metal materialRight = Metal(float3(0.8, 0.6, 0.2));
+    // Metal materialLeft = Metal(float3(1.0, 1.0, 1.0), pushConstants.alpha);
+    Metal materialLeft = Metal(float3(0.1, 0.1, 0.2), 0.0);
+    Metal materialRight = Metal(float3(0.8, 0.6, 0.2), pushConstants.alpha);
+    Dielectric materialGlass = Dielectric(1.5);
+    Dielectric materialBubble = Dielectric(1.0 / 1.5);
 
     Sphere ground = Sphere(float3(0.0, -100.5, -1.0), 100.0, materialGround);
     Sphere sphereCenter = Sphere(float3(0.0, 0.0, -1.2), 0.5, materialCenter);
     Sphere sphereLeft = Sphere(float3(-1.0, 0.0, -1.0), 0.5, materialLeft);
     Sphere sphereRight = Sphere(float3(1.0, 0.0, -1.0), 0.5, materialRight);
+    Sphere sphereGlass = Sphere(float3(0.0, 0.0, 0.5), 0.5, materialGlass);
+    Sphere sphereBubble = Sphere(float3(0.0, 0.0, 0.5), 0.499, materialBubble);
 
-    IHittable listOfObjects[] = { ground, sphereCenter, sphereLeft, sphereRight };
+    IHittable listOfObjects[] = { ground, sphereCenter, sphereLeft, sphereRight, sphereGlass, sphereBubble };
     HittableList world = HittableList(listOfObjects);
 
     Camera camera = Camera(thread);

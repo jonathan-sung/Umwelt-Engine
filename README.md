@@ -1,16 +1,17 @@
 # Path Tracing with Vulkan
 
+<!-- ![Screenshot](screenshots/2025-07-15_22-38-50.png)
+![Screenshot](screenshots/2025-07-19_23-17-30.png)
+![Screenshot](screenshots/2025-07-21_07-06-19.png) -->
+![Screenshot](screenshots/2025-07-22_19-54-04.png)
 
 ## Introduction
 
-This project demonstrates a simple path tracing implementation using Vulkan. It consists of two main components:
+This project demonstrates a path tracing implementation based on [Ray Tracing in One Weekend](https://raytracing.github.io/books/RayTracingInOneWeekend.html) by Peter Shirley using Vulkan. It is designed to be a learning resource for understanding how to implement path tracing in a modern graphics API. It consists of two main components:
 
 1. A compute shader that performs path tracing and outputs the result to a `VkImage`.
 2. A graphics pipeline that fills the screen with two triangles and samples a texture, which is the `VkImage` produced by the compute shader.
 
-![Screenshot](screenshots/2025-07-15_22-38-50.png)
-![Screenshot](screenshots/2025-07-19_23-17-30.png)
-![Screenshot](screenshots/2025-07-20_23-50-25.png)
 
 The compute shader is written in Slang, a high-level shading language that compiles to SPIR-V. The graphics pipeline is implemented using Vulkan and GLFW for window management.
 
