@@ -6,6 +6,8 @@
 #include <fstream>
 #include <glm/detail/qualifier.hpp>
 #include <glm/ext/vector_float2.hpp>
+#include <glm/fwd.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <limits>
 #include <optional>
 #include <string>
@@ -147,7 +149,8 @@ private:
     GLFWwindow *m_window;
     glm::dvec2 previousMousePosition = glm::dvec2(0.0);
     glm::dvec2 deltaMousePosition = glm::dvec2(0.0);
-    glm::vec3 cameraPositionOffset = glm::vec3(0.0f);
+    glm::vec4 cameraPositionOffset = glm::vec4(0.0f);
+    glm::vec4 cameraRotationEulerRadians = glm::vec4(0.0f);
 
     struct QueueFamilyIndices
     {
@@ -199,11 +202,15 @@ private:
 
     struct PushConstantData
     {
-        VkExtent2D extent;
-        float time;
-        float alpha = 0.5f;
-        glm::vec3 cameraPosition = glm::vec3(0.0f);
-        glm::vec3 cameraOrientationEulerAnglesInRadians = glm::vec3(0.0f);
+        VkExtent2D extent;                                            // 8 bytes
+        float time;                                                   // 4 byte
+        float a = 0.5f;                                               // 4 byte
+        float vfov = 90.0f;                                           // 4 byte
+        uint32_t samplesPerPixel = 10;                                // 4 byte
+        uint32_t maxRayBounces = 20;                                  // 4 byte
+        uint32_t padding;                                             // 4 bytes of padding
+        glm::vec4 cameraPosition = glm::vec4(0.0f);                   // offset 32; 16 bytes
+        glm::vec4 cameraForward = glm::vec4(0.0f, 0.0f, -1.0f, 0.0f); // offset 48; 16 bytes
     };
 
     const std::vector<const char *> validationLayers{
@@ -315,14 +322,16 @@ private:
         {
             static int counter = 0;
 
-            ImGui::Begin("Hello, world!"); // Create a window called "Hello, world!" and append into it.
+            ImGui::Begin("Controls"); // Create a window called "Hello, world!" and append into it.
 
-            ImGui::Text("This is some useful text."); // Display some text (you can use a format strings too)
+            ImGui::Text("Control Stuff"); // Display some text (you can use a format strings too)
 
-            ImGui::SliderFloat("alpha", &pushConstantData.alpha, 0.0f, 1.0f);     // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::SliderFloat("Camera X", &cameraPositionOffset.x, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::SliderFloat("Camera Y", &cameraPositionOffset.y, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::SliderFloat("Camera Z", &cameraPositionOffset.z, -10.0f, 10.0f); // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::SliderFloat("Fuzz", &pushConstantData.a, 0.0f, 1.0f); // Edit 1 float using a slider from 0.0f to 1.0f
+            ImGui::SliderFloat("Camera Field of View", &pushConstantData.vfov, 0.0f, 180.0f);
+            ImGui::SliderInt("Samples Per Pixel", reinterpret_cast<int *>(&pushConstantData.samplesPerPixel), 1, 100);
+            ImGui::SliderInt("Max Ray Bounces", reinterpret_cast<int *>(&pushConstantData.maxRayBounces), 1, 50);
+            ImGui::SliderFloat3("Camera Position", reinterpret_cast<float *>(&pushConstantData.cameraPosition), -100.0f, 100.0f);
+            ImGui::SliderFloat3("Camera Look At", reinterpret_cast<float *>(&pushConstantData.cameraForward), -100.0f, 100.0f);
 
             if (ImGui::Button("Button")) // Buttons return true when clicked (most widgets return true when edited/activated)
                 counter++;
@@ -1436,36 +1445,71 @@ private:
             speed = 0.5f;
         if (leftCtrl == GLFW_PRESS && leftShift == GLFW_PRESS)
             speed = 0.1f;
+        glm::mat4x4 cameraBasis = buildCameraBasisMatrix(pushConstantData.cameraForward);
         if (w == GLFW_PRESS)
-            cameraPositionOffset.z += -0.01f * speed;
+            pushConstantData.cameraPosition += cameraBasis[2] * -0.01f * speed;
         if (a == GLFW_PRESS)
-            cameraPositionOffset.x += -0.01f * speed;
+            pushConstantData.cameraPosition += cameraBasis[0] * -0.01f * speed;
         if (s == GLFW_PRESS)
-            cameraPositionOffset.z += 0.01f * speed;
+            pushConstantData.cameraPosition += cameraBasis[2] * 0.01f * speed;
         if (d == GLFW_PRESS)
-            cameraPositionOffset.x += 0.01f * speed;
+            pushConstantData.cameraPosition += cameraBasis[0] * 0.01f * speed;
         if (q == GLFW_PRESS)
-            cameraPositionOffset.y += 0.01f * speed;
+            pushConstantData.cameraPosition += cameraBasis[1] * 0.01f * speed;
         if (e == GLFW_PRESS)
-            cameraPositionOffset.y += -0.01f * speed;
+            pushConstantData.cameraPosition += cameraBasis[1] * -0.01f * speed;
         if (r == GLFW_PRESS)
-            cameraPositionOffset = glm::vec3(0.0f);
+            pushConstantData.cameraPosition = glm::vec4(0.0f);
 
         double sensitivity = 0.01;
         glm::dvec2 currentMousePosition = glm::dvec2(0.0);
         glfwGetCursorPos(m_window, &currentMousePosition.x, &currentMousePosition.y);
+        // std::clog << "current Mouse Position: " << currentMousePosition.x << ", " << currentMousePosition.y << "\r";
         deltaMousePosition = (currentMousePosition - previousMousePosition) * sensitivity;
         previousMousePosition = currentMousePosition;
     }
 
+    glm::mat4x4 buildCameraBasisMatrix(glm::vec3 forward, glm::vec3 worldUp = glm::vec3(0.0f, 1.0f, 0.0f))
+    {
+        glm::vec3 w = -glm::normalize(forward);               // Camera looks toward -Z
+        glm::vec3 u = glm::normalize(glm::cross(worldUp, w)); // Right vector
+        glm::vec3 v = glm::cross(w, u);                       // Up vector
+
+        glm::mat4x4 basis(1.0f);
+
+        // Assign basis vectors as columns
+        basis[0] = glm::vec4(u, 0.0f); // Right (X)
+        basis[1] = glm::vec4(v, 0.0f); // Up (Y)
+        basis[2] = glm::vec4(w, 0.0f); // Forward (Z)
+        basis[3] = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+
+        return basis;
+    }
+
     void updateCamera()
     {
-        // glm::vec3 cameraPosition = glm::vec3(0.0f);
-        // pushConstantData.cameraOrientationEulerAnglesInRadians.y -= deltaMousePosition.x;
-        // pushConstantData.cameraOrientationEulerAnglesInRadians.x += deltaMousePosition.y;
-        // cameraPosition.x = cosf(pushConstantData.cameraOrientationEulerAnglesInRadians.y);
-        // cameraPosition.z = sinf(pushConstantData.cameraOrientationEulerAnglesInRadians.y);
-        pushConstantData.cameraPosition = cameraPositionOffset;
+        if (glfwGetInputMode(m_window, GLFW_CURSOR) != GLFW_CURSOR_DISABLED)
+            return;
+        static float mouseSensitivity = 0.1f;
+
+        // Update rotation from mouse movement
+        cameraRotationEulerRadians.y -= deltaMousePosition.x * mouseSensitivity; // yaw
+        cameraRotationEulerRadians.x -= deltaMousePosition.y * mouseSensitivity; // pitch
+
+        // Clamp pitch to avoid gimbal lock
+        float pitchLimit = glm::radians(89.0f);
+        cameraRotationEulerRadians.x = glm::clamp(cameraRotationEulerRadians.x, -pitchLimit, pitchLimit);
+
+        // Create rotation matrices for pitch and yaw
+        glm::mat4x4 rotationYaw = glm::rotate(glm::mat4(1.0f), cameraRotationEulerRadians.y, glm::vec3(0.0f, 1.0f, 0.0f));   // Y axis
+        glm::mat4x4 rotationPitch = glm::rotate(glm::mat4(1.0f), cameraRotationEulerRadians.x, glm::vec3(1.0f, 0.0f, 0.0f)); // X axis
+
+        // Combine yaw and pitch rotations
+        glm::mat4x4 cameraRotationTransform = rotationYaw * rotationPitch;
+
+        // Update forward vector (Z axis points forward in camera space)
+        glm::vec3 forward = glm::vec3(cameraRotationTransform * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f));
+        pushConstantData.cameraForward = glm::vec4(forward, 0.0f);
     }
 
     void update()
@@ -2204,7 +2248,6 @@ private:
 
         vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
     }
-
 };
 
 int main()

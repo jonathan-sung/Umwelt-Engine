@@ -21,8 +21,13 @@ struct PushConstants
     uint width;
     uint height;
     float time;
-    float alpha;
-    float3 cameraPosition;
+    float a;
+    float vfov;
+    uint samplesPerPixel;
+    uint maxRayBounces;
+    uint padding;
+    float4 cameraPosition;
+    float4 cameraForward;
 };
 
 [[vk::push_constant]]
@@ -300,27 +305,45 @@ struct Sphere : IHittable
 struct Camera
 {
     float3 cameraCenter;
+    float3 cameraForward = float3(0.0, 0.0, -1.0);
+    float3 vectorUp = float3(0.0, 1.0, 0.0);
     float3 pixelUpperLeftCorner;
     float3 pixelU;
     float3 pixelV;
-    uint samplesPerPixel = 10;
+    uint samplesPerPixel;
     float pixelSamplesScale;
+    float vfov;
     uint3 thread;
+    float3 u, v, w; // basis vectors
 
     __init(uint3 thread)
     {
-        float focalLength = 1.0;
-        float viewportHeight = 2.0;
-        float viewportWidth = viewportHeight * (float(pushConstants.width) / float(pushConstants.height));
-        cameraCenter = pushConstants.cameraPosition;
+        cameraCenter = pushConstants.cameraPosition.xyz;
+        cameraForward = pushConstants.cameraForward.xyz;
+        // cameraLookAt = float3(0.0, 0.0, -1.0);
+        samplesPerPixel = pushConstants.samplesPerPixel;
+        vfov = pushConstants.vfov;
+        float3 lookFrom = cameraCenter;
 
-        float3 viewportU = float3(viewportWidth, 0, 0);
-        float3 viewportV = float3(0, -viewportHeight, 0);
+        // Determine viewport dimensions
+        float focalLength = 1.0; // length(lookFrom - cameraLookAt);
+        float theta = degreesToRadians(pushConstants.vfov);
+        float h = tan(theta / 2);
+        float viewportHeight = 2.0 * h * focalLength;
+        float viewportWidth = viewportHeight * (float(pushConstants.width) / float(pushConstants.height));
+
+        // Calculate basis vectors
+        w = normalize(-cameraForward);
+        u = cross(vectorUp, w);
+        v = cross(w, u);
+
+        float3 viewportU = viewportWidth * u;
+        float3 viewportV = viewportHeight * -v;
 
         pixelU = viewportU / pushConstants.width;
         pixelV = viewportV / pushConstants.height;
 
-        float3 viewportUpperLeftCorner = cameraCenter - float3(0, 0, focalLength) - (viewportU / 2) - (viewportV / 2);
+        float3 viewportUpperLeftCorner = cameraCenter - (focalLength * w) - (viewportU / 2) - (viewportV / 2);
         pixelUpperLeftCorner = viewportUpperLeftCorner + (0.5 * (pixelU + pixelV));
         pixelSamplesScale = 1.0 / samplesPerPixel;
         this.thread = thread;
@@ -333,7 +356,7 @@ struct Camera
         for (uint sample = 0; sample < samplesPerPixel; sample++)
         {
             Ray ray = getRay(thread.xy);
-            color += rayColor(ray, 20, world);
+            color += rayColor(ray, pushConstants.maxRayBounces, world);
         }
         color *= pixelSamplesScale;
         color = linearToGammaColor(color);
@@ -355,13 +378,13 @@ struct Camera
         return float3(random() - 0.5, random() - 0.5, 0);
     }
 
-    float3 rayColor(const Ray ray, uint maxLightBounces, const HittableList world)
+    float3 rayColor(const Ray ray, uint maxRayBounces, const HittableList world)
     {
         HitRecord hitRecord = HitRecord();
         Ray currentRay = ray;
         float3 color = float3(1.0);
         bool anyHit = false;
-        for (uint i = 0; i < maxLightBounces; i++)
+        for (uint i = 0; i < maxRayBounces; i++)
         {
             bool objectWasHit = world.hit(currentRay, Interval(0.001, float.maxValue), hitRecord);
             if (objectWasHit)
@@ -491,7 +514,7 @@ void computeMain(uint3 thread: SV_DispatchThreadID)
     Lambertian materialCenter = Lambertian(float3(0.1, 0.2, 0.5));
     // Metal materialLeft = Metal(float3(1.0, 1.0, 1.0), pushConstants.alpha);
     Metal materialLeft = Metal(float3(0.1, 0.1, 0.2), 0.0);
-    Metal materialRight = Metal(float3(0.8, 0.6, 0.2), pushConstants.alpha);
+    Metal materialRight = Metal(float3(0.8, 0.6, 0.2), pushConstants.a);
     Dielectric materialGlass = Dielectric(1.5);
     Dielectric materialBubble = Dielectric(1.0 / 1.5);
 
@@ -499,8 +522,8 @@ void computeMain(uint3 thread: SV_DispatchThreadID)
     Sphere sphereCenter = Sphere(float3(0.0, 0.0, -1.2), 0.5, materialCenter);
     Sphere sphereLeft = Sphere(float3(-1.0, 0.0, -1.0), 0.5, materialLeft);
     Sphere sphereRight = Sphere(float3(1.0, 0.0, -1.0), 0.5, materialRight);
-    Sphere sphereGlass = Sphere(float3(0.0, 0.0, 0.5), 0.5, materialGlass);
-    Sphere sphereBubble = Sphere(float3(0.0, 0.0, 0.5), 0.499, materialBubble);
+    Sphere sphereGlass = Sphere(float3(0.0, 0.0, 2.0), 0.5, materialGlass);
+    Sphere sphereBubble = Sphere(float3(0.0, 0.0, 2.0), 0.499, materialBubble);
 
     IHittable listOfObjects[] = { ground, sphereCenter, sphereLeft, sphereRight, sphereGlass, sphereBubble };
     HittableList world = HittableList(listOfObjects);
