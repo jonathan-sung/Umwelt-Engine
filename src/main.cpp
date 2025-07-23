@@ -202,15 +202,17 @@ private:
 
     struct PushConstantData
     {
-        VkExtent2D extent;                                            // 8 bytes
-        float time;                                                   // 4 byte
-        float a = 0.5f;                                               // 4 byte
-        float vfov = 90.0f;                                           // 4 byte
-        uint32_t samplesPerPixel = 10;                                // 4 byte
-        uint32_t maxRayBounces = 20;                                  // 4 byte
+        VkExtent2D extent;                                            // offset 0: 8 bytes
+        float time;                                                   // offset 8: 4 byte
+        float a = 0.5f;                                               // offset 12: 4 byte
+        float vfov = 90.0f;                                           // offset 16: 4 byte
+        uint32_t samplesPerPixel = 10;                                // offset 20: 4 byte
+        uint32_t maxRayBounces = 20;                                  // offset 24: 4 byte
         uint32_t padding;                                             // 4 bytes of padding
         glm::vec4 cameraPosition = glm::vec4(0.0f);                   // offset 32; 16 bytes
         glm::vec4 cameraForward = glm::vec4(0.0f, 0.0f, -1.0f, 0.0f); // offset 48; 16 bytes
+        float defocusAngle = 0.0f;                                    // offset 64
+        float focusDistance = 10.0f;                                  // offset 68
     };
 
     const std::vector<const char *> validationLayers{
@@ -331,7 +333,9 @@ private:
             ImGui::SliderInt("Samples Per Pixel", reinterpret_cast<int *>(&pushConstantData.samplesPerPixel), 1, 100);
             ImGui::SliderInt("Max Ray Bounces", reinterpret_cast<int *>(&pushConstantData.maxRayBounces), 1, 50);
             ImGui::SliderFloat3("Camera Position", reinterpret_cast<float *>(&pushConstantData.cameraPosition), -100.0f, 100.0f);
-            ImGui::SliderFloat3("Camera Look At", reinterpret_cast<float *>(&pushConstantData.cameraForward), -100.0f, 100.0f);
+            ImGui::SliderFloat3("Camera Orientation", reinterpret_cast<float *>(&pushConstantData.cameraForward), -100.0f, 100.0f);
+            ImGui::SliderFloat("Defocus Angle", &pushConstantData.defocusAngle, 0.0f, 90.0f);
+            ImGui::SliderFloat("Focus Distance", &pushConstantData.focusDistance, 0.0f, 100.0f);
 
             if (ImGui::Button("Button")) // Buttons return true when clicked (most widgets return true when edited/activated)
                 counter++;

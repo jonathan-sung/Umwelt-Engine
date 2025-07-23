@@ -28,6 +28,8 @@ struct PushConstants
     uint padding;
     float4 cameraPosition;
     float4 cameraForward;
+    float defocusAngle;
+    float focusDistance;
 };
 
 [[vk::push_constant]]
@@ -126,6 +128,15 @@ static float3 randomUnitVectorFloat3()
         float lengthSquared = dot(point, point);
         if (1e-16 < lengthSquared && lengthSquared <= 1)
             return point / sqrt(lengthSquared);
+    }
+}
+static float3 randomInUnitDisk()
+{
+    while (true)
+    {
+        float3 p = float3(random(-1, 1), random(-1, 1), 0);
+        if (lengthSquaredFloat3(p) < 1)
+            return p;
     }
 }
 
@@ -316,10 +327,16 @@ struct Camera
     uint3 thread;
     float3 u, v, w; // basis vectors
 
+    float defocusAngle = 0.0;
+    float focusDistance = 10.0;
+    float3 defocusDiskU, defocusDiskV;
+
     __init(uint3 thread)
     {
         cameraCenter = pushConstants.cameraPosition.xyz;
         cameraForward = pushConstants.cameraForward.xyz;
+        defocusAngle = pushConstants.defocusAngle;
+        focusDistance = pushConstants.focusDistance;
         // cameraLookAt = float3(0.0, 0.0, -1.0);
         samplesPerPixel = pushConstants.samplesPerPixel;
         vfov = pushConstants.vfov;
@@ -345,6 +362,12 @@ struct Camera
 
         float3 viewportUpperLeftCorner = cameraCenter - (focalLength * w) - (viewportU / 2) - (viewportV / 2);
         pixelUpperLeftCorner = viewportUpperLeftCorner + (0.5 * (pixelU + pixelV));
+
+        // Calculate defocus stuff
+        float defocusRadius = focusDistance * tan(radians(defocusAngle / 2));
+        defocusDiskU = u * defocusRadius;
+        defocusDiskV = v * defocusRadius;
+
         pixelSamplesScale = 1.0 / samplesPerPixel;
         this.thread = thread;
     }
@@ -367,7 +390,8 @@ struct Camera
     {
         float3 offset = sampleSquare();
         float3 pixelCenter = pixelUpperLeftCorner + ((float(thread.x) + offset.x) * pixelU) + ((float(thread.y) + offset.y) * pixelV);
-        float3 rayDirection = pixelCenter - cameraCenter;
+        float3 rayOrigin = (defocusAngle <= 0) ? cameraCenter : defocusDiskSample();
+        float3 rayDirection = pixelCenter - rayOrigin;
 
         Ray rayCameraToPixel = { cameraCenter, rayDirection };
         return rayCameraToPixel;
@@ -376,6 +400,12 @@ struct Camera
     float3 sampleSquare()
     {
         return float3(random() - 0.5, random() - 0.5, 0);
+    }
+
+    float3 defocusDiskSample()
+    {
+        float3 p = randomInUnitDisk();
+        return cameraCenter + (p[0] * defocusDiskU) + (p[1] * defocusDiskV);
     }
 
     float3 rayColor(const Ray ray, uint maxRayBounces, const HittableList world)
