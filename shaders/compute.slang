@@ -30,7 +30,8 @@ struct PushConstants
     float4 cameraForward;
     float defocusAngle;
     float focusDistance;
-    float dummy[4];
+    uint randomSeed;
+    float dummy[3];
 };
 
 [[vk::push_constant]]
@@ -42,7 +43,7 @@ static const float infinity = float.maxValue;
 static const float PI = 3.14159265359;
 static uint3 g_thread;
 static float randomCounter = 0;
-static uint seed = (g_thread.x - g_thread.y);
+static uint g_seed = pushConstants.randomSeed; // (g_thread.x - g_thread.y) % uint(pushConstants.time);
 
 // Global functions
 
@@ -91,14 +92,12 @@ static float random()
     uint a = 1664525;
     uint c = 1013904223;
     // uint m = 1 << 16;
-    seed = ((a * seed) + c); // % m;
+    g_seed = ((a * g_seed) + c); // % m;
 
-    float2 uv = float2(float(g_thread.x) + float(seed) / 4294967296.0, float(g_thread.y) - float(seed) / 4294967296.0);
+    float2 uv = float2(float(g_thread.x) + float(g_seed) / 4294967296.0, float(g_thread.y) - float(g_seed) / 4294967296.0);
 
     // Hash-like transformation to produce a float in [0,1)
     return fract(sin(dot(uv.xy, float2(12.9898, 78.233))) * 43758.5453123);
-
-    // return float(seed) / 4294967296.0; // 2^32
 }
 
 static float random(float min, float max)
@@ -238,9 +237,9 @@ struct Interval
 
 struct HittableList : IHittable
 {
-    IHittable objects[6];
+    IHittable objects[8];
 
-    __init(IHittable objects[6])
+    __init(IHittable objects[8])
     {
         this.objects = objects;
     }
@@ -352,7 +351,7 @@ struct Camera
 
         // Calculate basis vectors
         w = normalize(-cameraForward);
-        u = cross(vectorUp, w);
+        u = normalize(cross(vectorUp, w));
         v = cross(w, u);
 
         float3 viewportU = viewportWidth * u;
@@ -423,7 +422,7 @@ struct Camera
             {
                 anyHit = true;
                 Ray scattered;
-                float3 attenuation;
+                float3 attenuation = float3(1.0);
                 if (hitRecord.material.scatter(currentRay, hitRecord, attenuation, scattered))
                     color *= attenuation;
                 else
@@ -535,18 +534,20 @@ struct Dielectric : IMaterial
     }
 }
 
-[shader("compute")]
-[numthreads(16, 16, 1)]
-void computeMain(uint3 thread: SV_DispatchThreadID)
+void renderCoverScene()
 {
-    g_thread = thread;
+}
+
+void renderTestScene()
+{
     // World
 
     Lambertian materialGround = Lambertian(float3(0.8, 0.8, 0.0));
     Lambertian materialCenter = Lambertian(float3(0.1, 0.2, 0.5));
     // Metal materialLeft = Metal(float3(1.0, 1.0, 1.0), pushConstants.alpha);
-    Metal materialLeft = Metal(float3(0.1, 0.1, 0.2), 0.0);
-    Metal materialRight = Metal(float3(0.8, 0.6, 0.2), pushConstants.a);
+    Metal materialLeft = Metal(float3(0.8), pushConstants.a);
+    Metal materialFront = Metal(float3(0.2, 0.1, 0.2), 0.0);
+    Metal materialRight = Metal(float3(0.8, 0.6, 0.2), 1.0 - pushConstants.a);
     Dielectric materialGlass = Dielectric(1.5);
     Dielectric materialBubble = Dielectric(1.0 / 1.5);
 
@@ -554,12 +555,22 @@ void computeMain(uint3 thread: SV_DispatchThreadID)
     Sphere sphereCenter = Sphere(float3(0.0, 0.0, -1.2), 0.5, materialCenter);
     Sphere sphereLeft = Sphere(float3(-1.0, 0.0, -1.0), 0.5, materialLeft);
     Sphere sphereRight = Sphere(float3(1.0, 0.0, -1.0), 0.5, materialRight);
-    Sphere sphereGlass = Sphere(float3(0.0, 0.0, 2.0), 0.5, materialGlass);
-    Sphere sphereBubble = Sphere(float3(0.0, 0.0, 2.0), 0.499, materialBubble);
+    Sphere sphereGlass = Sphere(float3(1.0, 0.0, 2.0), 0.5, materialGlass);
+    Sphere sphereBubble = Sphere(float3(1.0, 0.0, 2.0), 0.49, materialBubble);
+    Sphere sphereGlass2 = Sphere(float3(-1.0, 0.0, 2.0), 0.5, materialGlass);
+    Sphere sphereFront = Sphere(float3(0.0, 2.0, 1.0), 0.25, materialFront);
 
-    IHittable listOfObjects[] = { ground, sphereCenter, sphereLeft, sphereRight, sphereGlass, sphereBubble };
+    IHittable listOfObjects[] = { ground, sphereCenter, sphereLeft, sphereRight, sphereGlass, sphereBubble, sphereGlass2, sphereFront };
     HittableList world = HittableList(listOfObjects);
 
-    Camera camera = Camera(thread);
+    Camera camera = Camera(g_thread);
     camera.render(world);
+}
+
+[shader("compute")]
+[numthreads(16, 16, 1)]
+void computeMain(uint3 thread: SV_DispatchThreadID)
+{
+    g_thread = thread;
+    renderTestScene();
 }

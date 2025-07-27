@@ -204,7 +204,7 @@ private:
     {
         VkExtent2D extent;                                            // offset 0: 8 bytes
         float time;                                                   // offset 8: 4 byte
-        float a = 0.5f;                                               // offset 12: 4 byte
+        float a = 0.0f;                                               // offset 12: 4 byte
         float vfov = 90.0f;                                           // offset 16: 4 byte
         uint32_t samplesPerPixel = 10;                                // offset 20: 4 byte
         uint32_t maxRayBounces = 20;                                  // offset 24: 4 byte
@@ -213,7 +213,8 @@ private:
         glm::vec4 cameraForward = glm::vec4(0.0f, 0.0f, -1.0f, 0.0f); // offset 48; 16 bytes
         float defocusAngle = 0.0f;                                    // offset 64
         float focusDistance = 1.0f;                                   // offset 68
-        float dummy[4];
+        uint32_t randomSeed = 0;                                      // offset 72
+        float dummy[3];
     };
 
     const std::vector<const char *> validationLayers{
@@ -330,13 +331,13 @@ private:
             ImGui::Text("Control Stuff"); // Display some text (you can use a format strings too)
 
             ImGui::SliderFloat("Fuzz", &pushConstantData.a, 0.0f, 1.0f); // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::SliderFloat("Camera Field of View", &pushConstantData.vfov, 0.0f, 180.0f);
+            ImGui::SliderFloat("Camera Field of View", &pushConstantData.vfov, 0.001f, 179.999f);
             ImGui::SliderInt("Samples Per Pixel", reinterpret_cast<int *>(&pushConstantData.samplesPerPixel), 1, 200);
             ImGui::SliderInt("Max Ray Bounces", reinterpret_cast<int *>(&pushConstantData.maxRayBounces), 1, 50);
             ImGui::SliderFloat3("Camera Position", reinterpret_cast<float *>(&pushConstantData.cameraPosition), -100.0f, 100.0f);
             ImGui::SliderFloat3("Camera Orientation", reinterpret_cast<float *>(&pushConstantData.cameraForward), -100.0f, 100.0f);
             ImGui::SliderFloat("Defocus Angle", &pushConstantData.defocusAngle, 0.0f, 90.0f);
-            ImGui::SliderFloat("Focus Distance", &pushConstantData.focusDistance, 0.001f, 100.0f);
+            ImGui::SliderFloat("Focus Distance", &pushConstantData.focusDistance, 0.001f, 10.0f);
             ImGui::SliderFloat("Focal Length", &pushConstantData.focalLength, 0.0f, 100.0f);
             ImGui::SliderFloat4("Dummy ", reinterpret_cast<float *>(&pushConstantData.dummy), 0.0f, 100.0f);
 
@@ -1668,6 +1669,7 @@ private:
 
         pushConstantData.extent = m_swapChainExtent;
         pushConstantData.time = static_cast<float>(glfwGetTime());
+        pushConstantData.randomSeed = rand();
         // std::clog << pushConstantData.alpha << "\r" << std::flush;
 
         vkCmdPushConstants(m_commandBuffers[0], m_computePipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstantData), reinterpret_cast<void *>(&pushConstantData));
