@@ -34,17 +34,22 @@ Then, you can build and run the project using the following command:
 make run
 ```
 
+### Windows
+
+Fuck Windows.
+![Screenshot](screenshots/bill-gates-dab.gif)
+
 ## Controls
 
+- **Mouse**: Look around.
 - **WASD**: Move the camera.
-- **Q/E**: Move the camera up/down.
+- **Q/E**: Move the camera down/up.
 - **Left Shift**: Move faster.
 - **Left Ctrl**: Move slower.
 - **Left Shift + Left Ctrl**: Move very slowly.
 - **Space**: Toggle mouse cursor visibility.
 - **Esc**: Exit the application.
 - **R**: Reset the camera position.
-- **Mouse**: Look around. (not implemented yet)
 
 ## References
 

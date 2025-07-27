@@ -1463,9 +1463,9 @@ private:
         if (d == GLFW_PRESS)
             pushConstantData.cameraPosition += cameraBasis[0] * 0.01f * speed;
         if (q == GLFW_PRESS)
-            pushConstantData.cameraPosition += cameraBasis[1] * 0.01f * speed;
-        if (e == GLFW_PRESS)
             pushConstantData.cameraPosition += cameraBasis[1] * -0.01f * speed;
+        if (e == GLFW_PRESS)
+            pushConstantData.cameraPosition += cameraBasis[1] * 0.01f * speed;
         if (r == GLFW_PRESS)
             pushConstantData.cameraPosition = glm::vec4(0.0f);
 
