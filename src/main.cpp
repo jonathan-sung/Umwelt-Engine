@@ -334,12 +334,12 @@ private:
             ImGui::SliderFloat("Camera Field of View", &pushConstantData.vfov, 0.001f, 179.999f);
             ImGui::SliderInt("Samples Per Pixel", reinterpret_cast<int *>(&pushConstantData.samplesPerPixel), 1, 200);
             ImGui::SliderInt("Max Ray Bounces", reinterpret_cast<int *>(&pushConstantData.maxRayBounces), 1, 50);
-            ImGui::SliderFloat3("Camera Position", reinterpret_cast<float *>(&pushConstantData.cameraPosition), -100.0f, 100.0f);
-            ImGui::SliderFloat3("Camera Orientation", reinterpret_cast<float *>(&pushConstantData.cameraForward), -100.0f, 100.0f);
+            // ImGui::SliderFloat3("Camera Position", reinterpret_cast<float *>(&pushConstantData.cameraPosition), -100.0f, 100.0f);
+            // ImGui::SliderFloat3("Camera Orientation", reinterpret_cast<float *>(&pushConstantData.cameraForward), -100.0f, 100.0f);
             ImGui::SliderFloat("Defocus Angle", &pushConstantData.defocusAngle, 0.0f, 90.0f);
             ImGui::SliderFloat("Focus Distance", &pushConstantData.focusDistance, 0.001f, 10.0f);
             ImGui::SliderFloat("Focal Length", &pushConstantData.focalLength, 0.0f, 100.0f);
-            ImGui::SliderFloat4("Dummy ", reinterpret_cast<float *>(&pushConstantData.dummy), 0.0f, 100.0f);
+            ImGui::SliderFloat3("Dummy ", reinterpret_cast<float *>(&pushConstantData.dummy), 0.0f, 100.0f);
 
             if (ImGui::Button("Button")) // Buttons return true when clicked (most widgets return true when edited/activated)
                 counter++;
@@ -2082,7 +2082,7 @@ private:
         for (const auto &presentMode : availablePresentModes)
         {
             if (presentMode == VK_PRESENT_MODE_MAILBOX_KHR)
-                // if (presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR)
+            // if (presentMode == VK_PRESENT_MODE_IMMEDIATE_KHR)
                 return presentMode;
         }
 

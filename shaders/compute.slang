@@ -512,11 +512,12 @@ struct Dielectric : IMaterial
         float cosTheta = min(dot(-unitDirection, record.normal), 1.0);
         float sinTheta = sqrt(1 - cosTheta * cosTheta);
 
-        bool cannotRefract = ri * sinTheta > 1.0;
+        bool internalReflection = ri * sinTheta > 1.0;
+        bool schlick = reflectance(cosTheta, ri) > random();
         float3 refractedDirection;
 
         // angle is very steep so instead of refracting the light, it reflects it
-        if (cannotRefract || reflectance(cosTheta, ri) > random())
+        if (schlick)
             refractedDirection = reflect(unitDirection, record.normal);
         else
             refractedDirection = refract(unitDirection, record.normal, ri);
@@ -544,7 +545,6 @@ void renderTestScene()
 
     Lambertian materialGround = Lambertian(float3(0.8, 0.8, 0.0));
     Lambertian materialCenter = Lambertian(float3(0.1, 0.2, 0.5));
-    // Metal materialLeft = Metal(float3(1.0, 1.0, 1.0), pushConstants.alpha);
     Metal materialLeft = Metal(float3(0.8), pushConstants.a);
     Metal materialFront = Metal(float3(0.2, 0.1, 0.2), 0.0);
     Metal materialRight = Metal(float3(0.8, 0.6, 0.2), 1.0 - pushConstants.a);
